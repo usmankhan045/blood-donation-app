@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "412701576535",
+    "project_id": "lifedrop-5f112",
+    "storage_bucket": "lifedrop-5f112.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:412701576535:android:b49339136f93070ffd4212",
+        "android_client_info": {
+          "package_name": "com.example.blood"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "412701576535-0oit09vpaf02pgeervh1o40alka9g6s9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.blood",
+            "certificate_hash": "5c42472451790949ab501c7a2461c348f9aa270d"
+          }
+        },
+        {
+          "client_id": "412701576535-clr539fevhgefrm9edi9aglt64bjrf79.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCg0IGD_PcCf8meavADdTDZCNZG4qtXCaY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "412701576535-clr539fevhgefrm9edi9aglt64bjrf79.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

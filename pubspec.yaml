@@ -1,0 +1,52 @@
+name: blood_donation_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ---- Firebase & Auth ----
+  firebase_core: ^4.1.1
+  firebase_auth: ^6.1.0
+  cloud_firestore: ^6.0.2
+  firebase_storage: ^13.0.2
+  google_sign_in: ^6.2.1
+  http: ^1.2.0
+#  firebase_messaging: ^16.0.2
+#  flutter_local_notifications: ^19.4.2
+
+  # ---- Media ----
+  image_picker: ^1.0.7
+
+  # ---- Location & Maps (FREE: OpenStreetMap) ----
+  flutter_map: ^8.2.2
+  latlong2: ^0.9.0
+  geolocator: ^14.0.2
+  geocoding: ^4.0.0
+  onesignal_flutter: ^5.2.0
+
+  # ---- UI ----
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  assets:
+    - lib/assets/images/logo.png
+    - lib/assets/images/google_logo.png
+  uses-material-design: true
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
