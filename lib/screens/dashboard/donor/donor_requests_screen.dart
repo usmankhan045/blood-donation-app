@@ -3,6 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../services/donor_service.dart';
+import '../../../services/notification_service.dart';
+import '../../../models/blood_request_model.dart';
+
 class DonorRequestsScreen extends StatefulWidget {
   const DonorRequestsScreen({super.key});
 
@@ -13,6 +17,8 @@ class DonorRequestsScreen extends StatefulWidget {
 class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
+  final DonorService _donorService = DonorService();
+  final NotificationService _notificationService = NotificationService();
 
   Future<Map<String, dynamic>?> _loadDonorProfile() async {
     final uid = _auth.currentUser!.uid;
@@ -20,48 +26,117 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
     return doc.data();
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _requestsStream(String bloodType) {
-    // MVP: city-locked + bloodType match + active
-    return _firestore
-        .collection('blood_requests')
-        .where('city', isEqualTo: 'Abbottabad')
-        .where('status', isEqualTo: 'active')
-        .where('bloodType', isEqualTo: bloodType)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
+  // Get available requests for current donor using DonorService
+  Stream<List<BloodRequest>> _getAvailableRequests(String bloodType) {
+    return _donorService.getAvailableRequests();
   }
 
-  Future<void> _acceptRequest(String requestId) async {
+  // Get accepted requests for current donor
+  Stream<List<BloodRequest>> _getAcceptedRequests() {
+    return _donorService.getAcceptedRequests();
+  }
+
+  Future<void> _acceptRequest(String requestId, String donorName) async {
     try {
-      final uid = _auth.currentUser!.uid;
-      await _firestore.runTransaction((tx) async {
-        final ref = _firestore.collection('blood_requests').doc(requestId);
-        final snap = await tx.get(ref);
-        if (!snap.exists) {
-          throw Exception('Request not found');
-        }
-        final status = snap.data()!['status'] as String? ?? 'active';
-        if (status != 'active') {
-          throw Exception('Request is not active');
-        }
-        tx.update(ref, {
-          'status': 'accepted',
-          'acceptedBy': uid,
-          'acceptedAt': FieldValue.serverTimestamp(),
-        });
-      });
+      await _donorService.acceptRequest(requestId, donorName);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Request accepted.')),
+          SnackBar(
+            content: const Text('Request accepted successfully!'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to accept: $e')),
+          SnackBar(
+            content: Text('Failed to accept request: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
+    }
+  }
+
+  Future<void> _completeRequest(String requestId) async {
+    try {
+      await _donorService.completeRequest(requestId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Donation marked as completed!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to complete request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _declineRequest(String requestId) async {
+    try {
+      await _donorService.declineRequest(requestId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Request declined'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to decline request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Get urgency color
+  Color _getUrgencyColor(String urgency) {
+    switch (urgency.toLowerCase()) {
+      case 'emergency':
+        return Colors.red;
+      case 'high':
+        return Colors.orange;
+      case 'normal':
+        return Colors.blue;
+      case 'low':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // Get urgency icon
+  IconData _getUrgencyIcon(String urgency) {
+    switch (urgency.toLowerCase()) {
+      case 'emergency':
+        return Icons.emergency;
+      case 'high':
+        return Icons.warning_amber;
+      case 'normal':
+        return Icons.info;
+      case 'low':
+        return Icons.low_priority;
+      default:
+        return Icons.bloodtype;
     }
   }
 
@@ -76,140 +151,321 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
           );
         }
         final donor = donorSnap.data ?? {};
-        final role = (donor['role'] ?? '').toString().toLowerCase();
-        final bloodType = (donor['bloodType'] ?? '').toString().toUpperCase();
+        final userType = (donor['userType'] ?? donor['role'] ?? '').toString().toLowerCase();
+        final bloodType = (donor['bloodGroup'] ?? donor['bloodType'] ?? '').toString().toUpperCase();
+        final donorName = (donor['fullName'] ?? 'Donor').toString();
 
-        if (role != 'donor' || bloodType.isEmpty) {
+        if (userType != 'donor' || bloodType.isEmpty) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Requests')),
+            appBar: AppBar(title: const Text('Blood Requests')),
             body: const Center(
-              child: Text('This view is only for donors with a set blood type.'),
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.bloodtype, size: 64, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text(
+                      'Donor Access Only',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'This screen is only available for registered donors with a blood type set in their profile.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         }
 
-        return Scaffold(
-          appBar: AppBar(title: const Text('Abbottabad Requests')),
-          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: _requestsStream(bloodType),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snap.hasError) {
-                return Center(child: Text('Error: ${snap.error}'));
-              }
-              final docs = snap.data?.docs ?? [];
-              if (docs.isEmpty) {
-                return const Center(child: Text('No active requests right now.'));
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.all(12),
-                itemCount: docs.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final data = docs[i].data();
-                  final id = docs[i].id;
-                  final bloodType = (data['bloodType'] ?? '').toString();
-                  final urgency = (data['urgency'] ?? '').toString();
-                  final address = (data['address'] ?? 'Abbottabad').toString();
-                  final requester = (data['requesterName'] ?? 'Recipient').toString();
-                  final createdAt = data['createdAt'];
-                  final neededBy = data['neededBy'];
-                  final status = (data['status'] ?? '').toString();
-
-                  return Card(
-                    elevation: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text('Blood: $bloodType',
-                                  style: const TextStyle(
-                                      fontSize: 16, fontWeight: FontWeight.w600)),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: urgency.toLowerCase() == 'urgent'
-                                      ? Colors.red.withOpacity(0.12)
-                                      : Colors.orange.withOpacity(0.12),
-                                ),
-                                child: Text(
-                                  urgency.toUpperCase(),
-                                  style: TextStyle(
-                                    color: urgency.toLowerCase() == 'urgent'
-                                        ? Colors.red
-                                        : Colors.orange,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text('Requester: $requester'),
-                          const SizedBox(height: 4),
-                          Text('Address: $address'),
-                          if (createdAt != null) ...[
-                            const SizedBox(height: 4),
-                            Text('Posted: ${_friendlyTimestamp(createdAt)}'),
-                          ],
-                          if (neededBy != null) ...[
-                            const SizedBox(height: 4),
-                            Text('Needed by: ${_friendlyTimestamp(neededBy)}'),
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: status == 'active'
-                                    ? () => _acceptRequest(id)
-                                    : null,
-                                icon: const Icon(Icons.check),
-                                label: const Text('Accept'),
-                              ),
-                              const SizedBox(width: 8),
-                              TextButton.icon(
-                                onPressed: () {
-                                  // Optional: later we can open external maps (url_launcher).
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Map deep-link coming soon.'),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.map_outlined),
-                                label: const Text('View Map'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
+        return DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('Blood Requests'),
+              bottom: const TabBar(
+                tabs: [
+                  Tab(icon: Icon(Icons.notifications_active), text: 'Available'),
+                  Tab(icon: Icon(Icons.check_circle), text: 'Accepted'),
+                ],
+              ),
+            ),
+            body: TabBarView(
+              children: [
+                // Available Requests Tab
+                _buildAvailableRequestsTab(bloodType, donorName),
+                // Accepted Requests Tab
+                _buildAcceptedRequestsTab(),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  String _friendlyTimestamp(dynamic ts) {
-    try {
-      final dt = (ts as Timestamp).toDate();
-      return '${dt.year}-${_two(dt.month)}-${_two(dt.day)} '
-          '${_two(dt.hour)}:${_two(dt.minute)}';
-    } catch (_) {
-      return '-';
-    }
+  Widget _buildAvailableRequestsTab(String bloodType, String donorName) {
+    return StreamBuilder<List<BloodRequest>>(
+      stream: _getAvailableRequests(bloodType),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final requests = snapshot.data ?? [];
+        if (requests.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.bloodtype_outlined, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No Active Requests',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'When new blood requests match your blood type,\nthey will appear here.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(12),
+          itemCount: requests.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final request = requests[index];
+            return _buildRequestCard(request, donorName, false);
+          },
+        );
+      },
+    );
   }
 
-  String _two(int n) => n.toString().padLeft(2, '0');
+  Widget _buildAcceptedRequestsTab() {
+    return StreamBuilder<List<BloodRequest>>(
+      stream: _getAcceptedRequests(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final requests = snapshot.data ?? [];
+        if (requests.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No Accepted Requests',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Requests you accept will appear here.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(12),
+          itemCount: requests.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final request = requests[index];
+            return _buildRequestCard(request, '', true);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRequestCard(BloodRequest request, String donorName, bool isAccepted) {
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with Blood Type and Urgency
+            Row(
+              children: [
+                Icon(Icons.bloodtype, color: Colors.red, size: 24),
+                const SizedBox(width: 8),
+                Text(
+                  request.bloodType,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                  ),
+                ),
+                const Spacer(),
+                Chip(
+                  backgroundColor: _getUrgencyColor(request.urgency).withOpacity(0.1),
+                  label: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _getUrgencyIcon(request.urgency),
+                        size: 16,
+                        color: _getUrgencyColor(request.urgency),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        request.urgency.toUpperCase(),
+                        style: TextStyle(
+                          color: _getUrgencyColor(request.urgency),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Request Details
+            _buildDetailRow(Icons.person, 'Requester:', request.requesterName),
+            _buildDetailRow(Icons.location_on, 'Location:', request.address),
+            _buildDetailRow(Icons.local_hospital, 'Hospital:', request.hospital ?? 'Not specified'),
+            _buildDetailRow(Icons.bloodtype, 'Units Needed:', '${request.units} unit(s)'),
+
+            if (request.notes?.isNotEmpty ?? false) ...[
+              _buildDetailRow(Icons.notes, 'Notes:', request.notes!),
+            ],
+
+            if (request.neededBy != null) ...[
+              _buildDetailRow(
+                Icons.calendar_today,
+                'Needed by:',
+                '${request.neededBy!.day}/${request.neededBy!.month}/${request.neededBy!.year}',
+              ),
+            ],
+
+            _buildDetailRow(
+              Icons.access_time,
+              'Posted:',
+              _friendlyTimestamp(request.createdAt ?? DateTime.now()),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Action Buttons
+            if (!isAccepted)
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _acceptRequest(request.id, donorName),
+                      icon: const Icon(Icons.check_circle, size: 20),
+                      label: const Text('Accept Request'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _declineRequest(request.id),
+                      icon: const Icon(Icons.cancel, size: 20),
+                      label: const Text('Decline'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _completeRequest(request.id),
+                      icon: const Icon(Icons.done_all, size: 20),
+                      label: const Text('Complete Donation'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.black87, fontSize: 14),
+                children: [
+                  TextSpan(
+                    text: '$label ',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  TextSpan(text: value),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _friendlyTimestamp(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    if (difference.inDays < 7) return '${difference.inDays}d ago';
+
+    return '${date.day}/${date.month}/${date.year}';
+  }
 }

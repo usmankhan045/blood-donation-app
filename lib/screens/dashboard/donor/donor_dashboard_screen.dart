@@ -2,13 +2,12 @@ import 'dart:ui' show ImageFilter;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
 import '../../../services/donor_service.dart';
 import '../../../repositories/blood_request_repository.dart';
 import '../../../models/blood_request_model.dart';
 import '../../chat/chat_screen.dart';
 import 'donor_profile_screen.dart';
-
+import 'donor_requests_screen.dart';
 
 class DonorDashboardScreen extends StatefulWidget {
   const DonorDashboardScreen({super.key});
@@ -19,21 +18,26 @@ class DonorDashboardScreen extends StatefulWidget {
 
 class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
   final _donorService = DonorService();
+  final _auth = FirebaseAuth.instance;
 
   bool _isAvailable = false;
   bool _profileCompleted = false;
   String? _city;
   String? _bloodType;
-  bool _navigating = false; // guard against rapid taps
+  String? _donorName;
+  bool _navigating = false;
+  int _totalDonations = 0;
+  int _pendingRequests = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadStats();
   }
 
   Future<void> _loadProfile() async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final uid = _auth.currentUser!.uid;
     final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final d = doc.data() ?? {};
     if (!mounted) return;
@@ -41,8 +45,19 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
       _isAvailable = (d['isAvailable'] ?? false) as bool;
       _profileCompleted = (d['profileCompleted'] ?? false) as bool;
       _city = d['city'] as String?;
-      _bloodType = (d['bloodType'] as String?)?.toUpperCase(); // normalize
+      _bloodType = (d['bloodGroup'] ?? d['bloodType'] as String?)?.toUpperCase();
+      _donorName = d['fullName'] as String?;
     });
+  }
+
+  Future<void> _loadStats() async {
+    final stats = await _donorService.getDonorStats();
+    if (mounted) {
+      setState(() {
+        _totalDonations = stats['totalDonations'] ?? 0;
+        _pendingRequests = stats['pendingRequests'] ?? 0;
+      });
+    }
   }
 
   Future<void> _toggle(bool v) async {
@@ -51,7 +66,6 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
     setState(() => _isAvailable = v);
   }
 
-  // push direct page instead of named route
   Future<void> _openProfile() async {
     if (_navigating) return;
     _navigating = true;
@@ -60,17 +74,28 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
     );
     _navigating = false;
     if (mounted) {
-      await _loadProfile(); // refresh profile after return
+      await _loadProfile();
+      await _loadStats();
     }
   }
 
   void _openProfileCompletion() {
-    Navigator.pushNamed(context, '/donor_profile_completion').then((_) => _loadProfile());
+    Navigator.pushNamed(context, '/donor_profile_completion').then((_) {
+      _loadProfile();
+      _loadStats();
+    });
+  }
+
+  void _openRequestsScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DonorRequestsScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final ready = _profileCompleted; // real completion flag
+    final ready = _profileCompleted;
     final canReceive = ready && _isAvailable && _city != null && _bloodType != null;
 
     return Scaffold(
@@ -79,15 +104,8 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
         elevation: 0,
         title: const Text('Donor Dashboard'),
         centerTitle: true,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
+        backgroundColor: const Color(0xFF67D5B5),
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             tooltip: 'My Profile',
@@ -98,74 +116,422 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
       ),
       body: Stack(
         children: [
-          Positioned(top: -60, left: -40, child: _blob(140, const Color(0x3367D5B5))),
-          Positioned(bottom: -50, right: -30, child: _blob(120, const Color(0x334AB9C5))),
+          // Background decorative elements
+          Positioned(top: -80, left: -60, child: _blob(160, const Color(0x1567D5B5))),
+          Positioned(bottom: -70, right: -50, child: _blob(140, const Color(0x154AB9C5))),
+          Positioned(top: 100, right: -30, child: _blob(80, const Color(0x15FF6B6B))),
+
           SafeArea(
-            child: DefaultTabController(
-              length: 2,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _HeaderCard(
-                      isAvailable: _isAvailable,
-                      city: _city ?? '-',
-                      bloodType: _bloodType ?? '-',
-                      onToggle: _toggle,
-                      onProfileTap: _openProfile,
-                      onCompleteTap: _openProfileCompletion,
-                      showCompleteBtn: !ready,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Welcome Header
+                  _buildWelcomeHeader(),
+                  const SizedBox(height: 20),
+
+                  // Stats Cards
+                  _buildStatsRow(),
+                  const SizedBox(height: 20),
+
+                  // Availability Card
+                  _buildAvailabilityCard(),
+                  const SizedBox(height: 20),
+
+                  // Quick Actions
+                  _buildQuickActions(canReceive, ready),
+                  const SizedBox(height: 20),
+
+                  // Recent Activity Header
+                  _buildRecentActivityHeader(),
+                  const SizedBox(height: 12),
+
+                  // Recent Donations
+                  Expanded(child: _buildRecentDonations()),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWelcomeHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Welcome back,',
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _donorName?.split(' ').first ?? 'Donor',
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2C3E50),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Ready to save lives today?',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatsRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: _StatCard(
+            icon: Icons.bloodtype,
+            value: _totalDonations.toString(),
+            label: 'Donations',
+            color: const Color(0xFF67D5B5),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _StatCard(
+            icon: Icons.pending_actions,
+            value: _pendingRequests.toString(),
+            label: 'Pending',
+            color: const Color(0xFFFFA726),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _StatCard(
+            icon: Icons.people,
+            value: _totalDonations.toString(),
+            label: 'Lives Saved',
+            color: const Color(0xFFEF5350),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAvailabilityCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF67D5B5).withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withOpacity(0.3)),
+            ),
+            child: Icon(
+              _isAvailable ? Icons.volunteer_activism : Icons.volunteer_activism_outlined,
+              color: Colors.white,
+              size: 30,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isAvailable ? 'Available to Donate' : 'Currently Unavailable',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _isAvailable
+                      ? 'You will receive blood requests'
+                      : 'Turn on to receive requests',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Transform.scale(
+            scale: 1.2,
+            child: Switch(
+              value: _isAvailable,
+              onChanged: _toggle,
+              activeColor: Colors.white,
+              activeTrackColor: Colors.white.withOpacity(0.5),
+              inactiveThumbColor: Colors.white,
+              inactiveTrackColor: Colors.white.withOpacity(0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions(bool canReceive, bool ready) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Quick Actions',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2C3E50),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.search,
+                title: 'Find Requests',
+                subtitle: 'Browse blood requests',
+                color: const Color(0xFF67D5B5),
+                onTap: _openRequestsScreen,
+                enabled: canReceive,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.history,
+                title: 'My History',
+                subtitle: 'Donation records',
+                color: const Color(0xFFFFA726),
+                onTap: () {
+                  // Navigate to history screen
+                },
+                enabled: true,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (!ready)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange[100]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info, color: Colors.orange[800]),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Complete Your Profile',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[800],
+                        ),
+                      ),
+                      Text(
+                        'Finish your profile to start receiving requests',
+                        style: TextStyle(
+                          color: Colors.orange[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: _openProfileCompletion,
+                  child: Text(
+                    'Complete',
+                    style: TextStyle(color: Colors.orange[800]),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRecentActivityHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const Text(
+          'Recent Activity',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2C3E50),
+          ),
+        ),
+        TextButton(
+          onPressed: () {
+            // Navigate to full history
+          },
+          child: const Text(
+            'View All',
+            style: TextStyle(color: Color(0xFF67D5B5)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentDonations() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('requests')
+          .where('acceptedBy', isEqualTo: uid)
+          .where('status', isEqualTo: 'completed')
+          .orderBy('completedAt', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        final donations = snapshot.data!.docs;
+
+        return ListView.builder(
+          physics: const BouncingScrollPhysics(),
+          itemCount: donations.length,
+          itemBuilder: (context, index) {
+            final donation = donations[index];
+            final data = donation.data() as Map<String, dynamic>;
+            final completedAt = data['completedAt'] as Timestamp?;
+            final bloodType = data['bloodType'] ?? 'Unknown';
+            final hospital = data['hospital'] ?? 'Unknown Hospital';
+            final units = data['units'] ?? 1;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                elevation: 2,
+                child: ListTile(
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF67D5B5).withOpacity(0.1),
+                      shape: BoxShape.circle,
                     ),
-                    const SizedBox(height: 12),
-                    const _EligibilityBanner(),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Recent Donations',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Colors.blueGrey[900],
+                    child: Icon(
+                      Icons.bloodtype,
+                      color: const Color(0xFF67D5B5),
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    hospital,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  subtitle: Text(
+                    completedAt != null
+                        ? '${_formatDate(completedAt.toDate())} • $units unit(s)'
+                        : '$units unit(s)',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      bloodType,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    const _RecentDonationsRow(),
-                    const SizedBox(height: 14),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: const TabBar(
-                        labelColor: Color(0xFF2C8D7C),
-                        unselectedLabelColor: Colors.black54,
-                        indicatorColor: Color(0xFF2C8D7C),
-                        tabs: [
-                          Tab(icon: Icon(Icons.inbox_outlined), text: 'Requests'),
-                          Tab(icon: Icon(Icons.history), text: 'History'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: TabBarView(
-                        children: [
-                          _RequestsTab(
-                            canReceive: canReceive,
-                            ready: ready,
-                            isAvailable: _isAvailable,
-                            city: _city,
-                            bloodType: _bloodType,
-                            onCompleteTap: _openProfileCompletion,
-                            onTurnOn: () => _toggle(true),
-                          ),
-                          const _DonationHistoryList(),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.bloodtype_outlined,
+            size: 80,
+            color: Colors.grey[300],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Donations Yet',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[400],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your donation history will appear here',
+            style: TextStyle(
+              color: Colors.grey[400],
             ),
           ),
         ],
@@ -176,7 +542,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
   Widget _blob(double size, Color color) {
     return ClipOval(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           width: size,
           height: size,
@@ -185,681 +551,144 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
       ),
     );
   }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) return 'Today';
+    if (difference.inDays == 1) return 'Yesterday';
+    if (difference.inDays < 7) return '${difference.inDays}d ago';
+
+    return '${date.day}/${date.month}/${date.year}';
+  }
 }
 
-// =================== Header Card ===================
+// =================== Stat Card ===================
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
 
-class _HeaderCard extends StatelessWidget {
-  final bool isAvailable;
-  final String city;
-  final String bloodType;
-  final ValueChanged<bool> onToggle;
-  final VoidCallback onProfileTap;
-  final VoidCallback onCompleteTap;
-  final bool showCompleteBtn;
-
-  const _HeaderCard({
-    required this.isAvailable,
-    required this.city,
-    required this.bloodType,
-    required this.onToggle,
-    required this.onProfileTap,
-    required this.onCompleteTap,
-    required this.showCompleteBtn,
+  const _StatCard({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF67D5B5).withOpacity(0.25),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.20),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.45)),
-                ),
-                child: const Icon(Icons.volunteer_activism, color: Colors.white, size: 30),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    _chip('City: $city'),
-                    _chip('Blood: $bloodType'),
-                    _chip(isAvailable ? 'Available' : 'Unavailable',
-                        color: isAvailable ? Colors.white : Colors.white70,
-                        textColor: isAvailable ? const Color(0xFF2C8D7C) : Colors.black87),
-                  ],
-                ),
-              ),
-              Switch(
-                value: isAvailable,
-                onChanged: onToggle,
-                activeColor: Colors.white,
-                activeTrackColor: Colors.white54,
-                inactiveThumbColor: Colors.white,
-                inactiveTrackColor: Colors.white24,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onProfileTap,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white70),
-                  ),
-                  icon: const Icon(Icons.account_circle),
-                  label: const Text('My Profile'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              if (showCompleteBtn)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onCompleteTap,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF2C8D7C),
-                      elevation: 0,
-                    ),
-                    icon: const Icon(Icons.edit_rounded),
-                    label: const Text('Complete Profile'),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(String label, {Color color = Colors.white, Color textColor = Colors.black87}) {
-    return Chip(
-      label: Text(label,
-          maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.w700, color: textColor)),
-      backgroundColor: color,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-  }
-}
-
-// =================== Eligibility Banner ===================
-
-class _EligibilityBanner extends StatelessWidget {
-  const _EligibilityBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
-
-    final q = FirebaseFirestore.instance
-        .collection('donations')
-        .where('donorId', isEqualTo: uid)
-        .orderBy('date', descending: true)
-        .limit(1);
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: q.snapshots(),
-      builder: (context, snap) {
-        DateTime? lastDonation;
-        if (snap.hasData && snap.data!.docs.isNotEmpty) {
-          final data = snap.data!.docs.first.data() as Map<String, dynamic>? ?? {};
-          final ts = data['date'];
-          if (ts is Timestamp) lastDonation = ts.toDate();
-        }
-
-        if (lastDonation == null) {
-          return _infoPill(
-              icon: Icons.calendar_today_outlined,
-              text: 'No past donations recorded. You are good to donate!',
-          );
-        }
-
-        final nextEligible = lastDonation.add(const Duration(days: 90));
-        final now = DateTime.now();
-        final eligible = now.isAfter(nextEligible);
-        final text = eligible
-            ? 'You are eligible to donate again. Last donation: ${_fmtDate(lastDonation)}'
-            : 'Next eligible on ${_fmtDate(nextEligible)} (last: ${_fmtDate(lastDonation)})';
-
-        return _infoPill(
-          icon: Icons.health_and_safety_outlined,
-          text: text,
-        );
-      },
-    );
-  }
-
-  Widget _infoPill({required IconData icon, required String text}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF2C8D7C)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2C3E50),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-// =================== Recent 3 Donations ===================
-
-class _RecentDonationsRow extends StatelessWidget {
-  const _RecentDonationsRow();
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
-
-    final q = FirebaseFirestore.instance
-        .collection('donations')
-        .where('donorId', isEqualTo: uid)
-        .orderBy('date', descending: true)
-        .limit(3);
-
-    return SizedBox(
-      height: 100,
-      child: StreamBuilder<QuerySnapshot>(
-        stream: q.snapshots(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final docs = snap.data?.docs ?? [];
-          if (docs.isEmpty) {
-            return const Center(child: Text('No donations yet.'));
-          }
-          return ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, i) {
-              final data = docs[i].data() as Map<String, dynamic>? ?? {};
-              final date = (data['date'] is Timestamp) ? (data['date'] as Timestamp).toDate() : null;
-              final units = (data['units'] ?? 1) as int;
-              final city = (data['city'] ?? '-') as String;
-              final hospital = (data['hospital'] ?? '') as String;
-              final recipient = (data['recipientName'] ?? '') as String;
-
-              final line2 = (hospital.isNotEmpty ? hospital : recipient.isNotEmpty ? recipient : city);
-
-              return Container(
-                width: 230,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade200),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 46,
-                      height: 46,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [Color(0xFFE3F7F2), Color(0xFFD2F1F3)],
-                        ),
-                      ),
-                      child: const Icon(Icons.water_drop, color: Color(0xFF2C8D7C)),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${units} unit${units > 1 ? 's' : ''}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: Colors.blueGrey[900],
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            line2.isEmpty ? '-' : line2,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            date == null ? '-' : _fmtDate(date),
-                            style: const TextStyle(color: Colors.black54, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-}
-
-// =================== Tabs Content ===================
-
-class _RequestsTab extends StatelessWidget {
-  final bool canReceive;
-  final bool ready;
-  final bool isAvailable;
-  final String? city;
-  final String? bloodType;
-  final VoidCallback onCompleteTap;
-  final VoidCallback onTurnOn;
-
-  const _RequestsTab({
-    required this.canReceive,
-    required this.ready,
-    required this.isAvailable,
-    required this.city,
-    required this.bloodType,
-    required this.onCompleteTap,
-    required this.onTurnOn,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (!ready) {
-      return _EmptyStateCard(
-        icon: Icons.info_outline,
-        title: 'Complete your profile',
-        message: 'Add your City & Blood Type to start receiving requests.',
-        ctaLabel: 'Complete Profile',
-        onCta: onCompleteTap,
-      );
-    }
-    if (!isAvailable) {
-      return _EmptyStateCard(
-        icon: Icons.toggle_off_outlined,
-        title: 'You are currently unavailable',
-        message: 'Switch yourself to AVAILABLE to receive matching requests.',
-        ctaLabel: 'Turn ON Availability',
-        onCta: onTurnOn,
-      );
-    }
-    if (city == null || bloodType == null) {
-      return const Center(child: Text('Profile missing City/Blood Type.'));
-    }
-    return _RequestsList(city: city!, bloodType: bloodType!);
-  }
-}
-
-class _DonationHistoryList extends StatelessWidget {
-  const _DonationHistoryList();
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const Center(child: Text('Not logged in'));
-
-    final q = FirebaseFirestore.instance
-        .collection('donations')
-        .where('donorId', isEqualTo: uid)
-        .orderBy('date', descending: true);
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: q.snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(child: Text('No donation history yet.'));
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.only(top: 6),
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, i) {
-            final data = docs[i].data() as Map<String, dynamic>? ?? {};
-            final date = (data['date'] is Timestamp) ? (data['date'] as Timestamp).toDate() : null;
-            final units = (data['units'] ?? 1) as int;
-            final status = (data['status'] ?? 'completed') as String;
-            final city = (data['city'] ?? '-') as String;
-            final hospital = (data['hospital'] ?? '') as String;
-            final recipient = (data['recipientName'] ?? '') as String;
-
-            final line2 = hospital.isNotEmpty ? hospital : (recipient.isNotEmpty ? recipient : city);
-
-            return Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Container(
-                margin: const EdgeInsets.all(1.4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFFE3F7F2),
-                    child: Text(
-                      '${units}u',
-                      style: const TextStyle(
-                        color: Color(0xFF2C8D7C),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    line2,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Colors.blueGrey[900],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    '${date == null ? '-' : _fmtDate(date)} • ${status.toUpperCase()}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // Optional: push details page if you later add it
-                  },
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-// =================== Existing Requests List ===================
-
-class _RequestsList extends StatelessWidget {
-  final String city;
-  final String bloodType;
-
-  const _RequestsList({required this.city, required this.bloodType});
-
-  @override
-  Widget build(BuildContext context) {
-    final repo = BloodRequestRepository();
-    // Ensure bloodType is normalized (e.g., 'A+', 'B-')
-    final bt = bloodType.toUpperCase();
-    return StreamBuilder<List<BloodRequest>>(
-      stream: repo.streamActiveForDonor(donorCity: city, donorBloodType: bt),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final items = snap.data ?? [];
-        if (items.isEmpty) {
-          return const Center(child: Text('No active requests right now.'));
-        }
-        return ListView.separated(
-          itemCount: items.length,
-          padding: const EdgeInsets.only(top: 6),
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, i) {
-            final r = items[i];
-            return _RequestCard(request: r);
-          },
-        );
-      },
-    );
-  }
-}
-
-class _RequestCard extends StatelessWidget {
-  final BloodRequest request;
-  const _RequestCard({required this.request});
-
-  @override
-  Widget build(BuildContext context) {
-    final createdStr = _fmtMaybeTimestamp(request.createdAt);
-
-    final subtitle = StringBuffer()
-      ..write('By: ')
-      ..write(request.requesterName.isEmpty ? request.requesterId : request.requesterName)
-      ..write('\nPosted: ')
-      ..write(createdStr);
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Container(
-        margin: const EdgeInsets.all(1.4),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(13),
-        ),
-        child: ListTile(
-          contentPadding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-          leading: CircleAvatar(
-            backgroundColor: const Color(0xFFE3F7F2),
-            child: Text(
-              request.bloodType,
-              style: const TextStyle(
-                color: Color(0xFF2C8D7C),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          title: Text(
-            '${request.bloodType} • ${request.city} • ${request.urgency.toUpperCase()}',
+          const SizedBox(height: 4),
+          Text(
+            label,
             style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: Colors.blueGrey[900],
+              color: Colors.grey[600],
+              fontSize: 12,
             ),
           ),
-          subtitle: Text(
-            subtitle.toString(),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: ElevatedButton(
-            onPressed: () async {
-              try {
-                await DonorService().acceptRequest(request.id);
-                if (context.mounted) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(
-                        threadId: request.id,
-                        title: 'Chat with Recipient',
-                      ),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to accept: $e')),
-                  );
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF67D5B5),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            ),
-            child: const Text('Accept'),
-          ),
-        ),
+        ],
       ),
     );
   }
 }
 
-// =================== Shared helpers ===================
-
-String _fmtDate(DateTime d) {
-  final y = d.year.toString().padLeft(4, '0');
-  final m = d.month.toString().padLeft(2, '0');
-  final day = d.day.toString().padLeft(2, '0');
-  final hh = d.hour.toString().padLeft(2, '0');
-  final mm = d.minute.toString().padLeft(2, '0');
-  return '$y-$m-$day $hh:$mm';
-}
-
-String _fmtMaybeTimestamp(dynamic tsOrDate) {
-  if (tsOrDate == null) return '-';
-  if (tsOrDate is DateTime) return _fmtDate(tsOrDate);
-  if (tsOrDate is Timestamp) return _fmtDate(tsOrDate.toDate());
-  return tsOrDate.toString();
-}
-
-class _EmptyStateCard extends StatelessWidget {
+// =================== Quick Action Card ===================
+class _QuickActionCard extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String message;
-  final String ctaLabel;
-  final VoidCallback onCta;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+  final bool enabled;
 
-  const _EmptyStateCard({
+  const _QuickActionCard({
     required this.icon,
     required this.title,
-    required this.message,
-    required this.ctaLabel,
-    required this.onCta,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+    required this.enabled,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        margin: const EdgeInsets.only(top: 6),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade200),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
+    return Material(
+      color: enabled ? color.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: enabled ? color.withOpacity(0.3) : Colors.grey.withOpacity(0.3),
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 46, color: const Color(0xFF2C8D7C)),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 16,
-                color: Colors.blueGrey[900],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                icon,
+                color: enabled ? color : Colors.grey,
+                size: 24,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: onCta,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF67D5B5),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: enabled ? color : Colors.grey,
+                  fontSize: 14,
+                ),
               ),
-              child: Text(ctaLabel),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  color: enabled ? color.withOpacity(0.7) : Colors.grey,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

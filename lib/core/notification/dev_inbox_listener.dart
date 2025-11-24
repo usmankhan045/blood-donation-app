@@ -52,8 +52,13 @@ class DevInboxListener {
               label: 'View',
               onPressed: () {
                 // Navigate to your donor requests screen or a specific detail
-                // You can push a detail screen with requestId if you have one
                 // For now we'll rely on the donor list page to show it.
+                // Here you can push a specific screen with requestId if needed
+                Navigator.pushNamed(
+                  context,
+                  '/donor_requests', // Example route to the donor requests screen
+                  arguments: {'requestId': requestId}, // Pass the requestId
+                );
               },
             ),
             duration: const Duration(seconds: 6),

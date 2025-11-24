@@ -1,207 +1,211 @@
-// lib/repositories/blood_request_repository.dart
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
 import '../models/blood_request_model.dart';
-
-/// Toggle this off when you switch to Cloud Functions + FCM in production.
-const bool DEV_NOTIFIER = true;
-
-/// Firestore collection keys
-class _Coll {
-  static const users = 'users';
-  static const requests = 'blood_requests';
-  static const userNotifications = 'user_notifications';
-  static const inbox = 'inbox';
-}
+import '../services/notification_service.dart';
 
 class BloodRequestRepository {
+  static final BloodRequestRepository _instance = BloodRequestRepository._internal();
+  factory BloodRequestRepository() => _instance;
   BloodRequestRepository._internal();
-  static final BloodRequestRepository instance = BloodRequestRepository._internal();
 
-  /// Expose a default constructor so `BloodRequestRepository()` works anywhere.
-  factory BloodRequestRepository() => instance;
+  static BloodRequestRepository get instance => _instance;
 
-  final _firestore = FirebaseFirestore.instance;
-  final _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _fs = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final NotificationService _notificationService = NotificationService();
 
-  /// Create a new blood request.
-  /// While on free plan (no Cloud Functions), this also fans out dev notifications
-  /// to eligible donors' inbox collections so they get in-app alerts.
+  // Create a new blood request and notify eligible donors
   Future<String> createRequest({
     required String requesterId,
     required String requesterName,
-    required String bloodType, // e.g. "A+"
-    required int units,
-    required String urgency, // "urgent" | "normal"
-    required String city, // e.g. "Abbottabad"
-    required String address,
-    required GeoPoint location,
-    String? hospital,                // optional
-    String? notes,                   // optional
-    String? phone,                   // optional
-    dynamic neededBy,                // <-- accepts DateTime? OR Timestamp?
-    Map<String, dynamic>? extra,
-  }) async {
-    final String cityNorm = city.trim();
-    final String typeNorm = bloodType.trim().toUpperCase();
-
-    // Normalize neededBy to Timestamp if provided
-    Timestamp? neededTs;
-    if (neededBy is Timestamp) {
-      neededTs = neededBy;
-    } else if (neededBy is DateTime) {
-      neededTs = Timestamp.fromDate(neededBy);
-    } else if (neededBy != null) {
-      // anything else gets ignored; keeps things resilient
-      // (you can throw if you prefer strict typing)
-    }
-
-    final reqRef = _firestore.collection(_Coll.requests).doc();
-    final payload = <String, dynamic>{
-      'requesterId': requesterId,
-      'requesterName': requesterName,
-      'bloodType': typeNorm,
-      'units': units,
-      'urgency': urgency,
-      'city': cityNorm,
-      'address': address,
-      'location': location,
-      if (hospital != null && hospital.trim().isNotEmpty) 'hospital': hospital.trim(),
-      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
-      'status': 'active', // active | accepted | completed | cancelled
-      'acceptedBy': null,
-      'createdAt': FieldValue.serverTimestamp(),
-      'neededBy': neededTs, // <-- normalized here
-      ...?extra,
-    };
-
-    await reqRef.set(payload);
-    final requestId = reqRef.id;
-
-    if (DEV_NOTIFIER) {
-      _fanOutToEligibleDonorsDev(
-        requestId: requestId,
-        requesterName: requesterName,
-        bloodType: typeNorm,
-        city: cityNorm,
-        address: address,
-      ).ignore();
-    }
-
-    return requestId;
-  }
-
-  /// Stream active requests matching a donor's city + bloodType, newest first.
-  Stream<List<BloodRequest>> streamActiveForDonor({
-    required String donorCity,
-    required String donorBloodType,
-  }) {
-    final city = donorCity.trim();
-    final type = donorBloodType.trim().toUpperCase();
-
-    final query = _firestore
-        .collection(_Coll.requests)
-        .where('city', isEqualTo: city)
-        .where('status', isEqualTo: 'active')
-        .where('bloodType', isEqualTo: type)
-        .orderBy('createdAt', descending: true);
-
-    return query.snapshots().map((snap) {
-      return snap.docs
-          .map((d) => BloodRequest.fromDoc(d as DocumentSnapshot<Map<String, dynamic>>))
-          .toList(growable: false);
-    });
-  }
-
-  /// Mark a request as accepted by a donor.
-  /// If [donorId] is not provided, current user is used.
-  Future<void> acceptRequest({
-    required String requestId,
-    String? donorId,
-  }) async {
-    final uid = donorId ?? _auth.currentUser!.uid;
-    await _firestore.runTransaction((tx) async {
-      final ref = _firestore.collection(_Coll.requests).doc(requestId);
-      final snap = await tx.get(ref);
-      if (!snap.exists) {
-        throw Exception('Request not found');
-      }
-      final status = (snap.data()?['status'] as String?) ?? 'active';
-      if (status != 'active') {
-        throw Exception('Request is not active');
-      }
-      tx.update(ref, {
-        'status': 'accepted',
-        'acceptedBy': uid,
-        'acceptedAt': FieldValue.serverTimestamp(),
-      });
-    });
-  }
-
-  /// DEV-ONLY: simulate push by writing an inbox doc for each eligible donor.
-  /// donors query: role=donor, city==city, bloodType==type, isAvailable==true
-  Future<void> _fanOutToEligibleDonorsDev({
-    required String requestId,
-    required String requesterName,
-    required String bloodType,
     required String city,
+    required String bloodType,
+    required String urgency,
+    required int units,
+    required GeoPoint location,
     required String address,
+    String? hospital,
+    String? notes,
+    String? phone,
+    DateTime? neededBy,
+    int searchRadius = 10,
   }) async {
     try {
-      final donorsSnap = await _firestore
-          .collection(_Coll.users)
-          .where('role', isEqualTo: 'donor')
-          .where('city', isEqualTo: city)
-          .where('bloodType', isEqualTo: bloodType)
+      // Create request document
+      final requestRef = _fs.collection('requests').doc();
+      final requestId = requestRef.id;
+
+      final request = BloodRequest(
+        id: requestId,
+        requesterId: requesterId,
+        requesterName: requesterName,
+        bloodType: bloodType,
+        units: units,
+        urgency: urgency,
+        city: city,
+        address: address,
+        location: location,
+        status: 'active',
+        hospital: hospital,
+        notes: notes,
+        phone: phone,
+        neededBy: neededBy,
+        searchRadius: searchRadius,
+        createdAt: DateTime.now(),
+      );
+
+      // Save to Firestore
+      await requestRef.set(request.toMap());
+
+      // Find and notify eligible donors
+      await _findAndNotifyEligibleDonors(request);
+
+      return requestId;
+    } catch (e) {
+      print('Error creating request: $e');
+      rethrow;
+    }
+  }
+
+  // Find eligible donors and send notifications
+  Future<void> _findAndNotifyEligibleDonors(BloodRequest request) async {
+    try {
+      // Get donors with matching blood type and availability
+      final donorsSnapshot = await _fs
+          .collection('users')
+          .where('userType', isEqualTo: 'donor')
+          .where('bloodGroup', isEqualTo: request.bloodType)
           .where('isAvailable', isEqualTo: true)
+          .where('profileCompleted', isEqualTo: true)
           .get();
 
-      if (donorsSnap.docs.isEmpty) return;
+      if (donorsSnapshot.docs.isEmpty) {
+        print('No eligible donors found for blood type: ${request.bloodType}');
+        return;
+      }
 
-      // Batch in chunks to stay under limits.
-      const maxPerBatch = 400;
-      List<WriteBatch> batches = [];
-      WriteBatch current = _firestore.batch();
-      int ops = 0;
+      final notifiedDonors = <String>[];
+      int notificationsSent = 0;
 
-      for (final d in donorsSnap.docs) {
-        final notifRef = _firestore
-            .collection(_Coll.userNotifications)
-            .doc(d.id)
-            .collection(_Coll.inbox)
-            .doc();
+      for (final donorDoc in donorsSnapshot.docs) {
+        final donorData = donorDoc.data();
+        final donorId = donorDoc.id;
 
-        current.set(notifRef, {
-          'type': 'blood_request',
-          'requestId': requestId,
-          'title': 'Blood request: $bloodType needed',
-          'body': '$requesterName • $address',
-          'city': city,
-          'bloodType': bloodType,
-          'read': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        ops++;
+        // Check if donor has location data
+        if (donorData['location'] is GeoPoint) {
+          final donorLocation = donorData['location'] as GeoPoint;
+          final distance = _calculateDistance(
+            request.location!.latitude,
+            request.location!.longitude,
+            donorLocation.latitude,
+            donorLocation.longitude,
+          );
 
-        if (ops >= maxPerBatch) {
-          batches.add(current);
-          current = _firestore.batch();
-          ops = 0;
+          // Check if donor is within search radius
+          if (distance <= request.searchRadius) {
+            final donorFcmToken = donorData['fcmToken'] as String?;
+
+            if (donorFcmToken != null && donorFcmToken.isNotEmpty) {
+              // Send notification to donor
+              await _notificationService.sendBloodRequestNotification(
+                donorFcmToken: donorFcmToken,
+                request: request,
+                distance: distance,
+              );
+
+              notifiedDonors.add(donorId);
+              notificationsSent++;
+
+              // Limit notifications for urgent requests to avoid spam
+              if (request.isUrgent && notificationsSent >= 20) break;
+              if (!request.isUrgent && notificationsSent >= 10) break;
+            }
+          }
         }
       }
 
-      if (ops > 0) batches.add(current);
-      for (final b in batches) {
-        await b.commit();
+      // Update request with notified donors
+      if (notifiedDonors.isNotEmpty) {
+        await _fs.collection('requests').doc(request.id).update({
+          'notifiedDonors': notifiedDonors,
+        });
       }
-    } catch (_) {
-      // dev notifier failing shouldn't break the flow
+
+      print('Sent $notificationsSent notifications for request ${request.id}');
+    } catch (e) {
+      print('Error notifying donors: $e');
     }
   }
-}
 
-extension _FutureIgnore on Future<void> {
-  void ignore() {}
+  // Calculate distance between two points using Haversine formula
+  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    const double earthRadius = 6371; // kilometers
+
+    double dLat = _toRadians(lat2 - lat1);
+    double dLon = _toRadians(lon2 - lon1);
+
+    double a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_toRadians(lat1)) * cos(_toRadians(lat2)) * sin(dLon / 2) * sin(dLon / 2);
+
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return earthRadius * c;
+  }
+
+  double _toRadians(double degree) {
+    return degree * pi / 180;
+  }
+
+  // Get active requests for a recipient
+  Stream<List<BloodRequest>> getRecipientRequests(String recipientId) {
+    return _fs
+        .collection('requests')
+        .where('requesterId', isEqualTo: recipientId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .map((doc) => BloodRequest.fromDoc(doc))
+        .toList());
+  }
+
+  // Get available requests for donors
+  Stream<List<BloodRequest>> getAvailableRequestsForDonor(String donorId) {
+    return _fs
+        .collection('requests')
+        .where('status', isEqualTo: 'active')
+        .where('notifiedDonors', arrayContains: donorId)
+        .orderBy('urgency')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .map((doc) => BloodRequest.fromDoc(doc))
+        .toList());
+  }
+
+  // Accept a blood request
+  Future<void> acceptRequest(String requestId, String donorId, String donorName) async {
+    await _fs.collection('requests').doc(requestId).update({
+      'status': 'accepted',
+      'acceptedBy': donorId,
+      'acceptedAt': FieldValue.serverTimestamp(),
+      'acceptedDonorName': donorName,
+    });
+  }
+
+  // Complete a blood request
+  Future<void> completeRequest(String requestId) async {
+    await _fs.collection('requests').doc(requestId).update({
+      'status': 'completed',
+      'completedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // Cancel a blood request
+  Future<void> cancelRequest(String requestId) async {
+    await _fs.collection('requests').doc(requestId).update({
+      'status': 'cancelled',
+      'cancelledAt': FieldValue.serverTimestamp(),
+    });
+  }
 }
