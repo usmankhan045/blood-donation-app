@@ -1,4 +1,3 @@
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -12,11 +11,17 @@ class RecipientDashboardScreen extends StatefulWidget {
 
 class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> {
   bool? profileCompleted;
+  String? _userName;
+  int _activeRequests = 0;
+  int _completedRequests = 0;
+  String? _bloodType;
 
   @override
   void initState() {
     super.initState();
     fetchProfileStatus();
+    _loadUserData();
+    _loadRequestStats();
   }
 
   Future<void> fetchProfileStatus() async {
@@ -29,13 +34,58 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> {
 
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (!mounted) return; // avoid setState after dispose
+      if (!mounted) return;
       setState(() {
         profileCompleted = (doc.data()?['profileCompleted'] ?? false) as bool;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => profileCompleted = false);
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (mounted) {
+          setState(() {
+            _userName = doc.data()?['fullName'] as String?;
+            _bloodType = doc.data()?['bloodGroup'] as String?;
+          });
+        }
+      } catch (e) {
+        print('Error loading user data: $e');
+      }
+    }
+  }
+
+  Future<void> _loadRequestStats() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final activeSnapshot = await FirebaseFirestore.instance
+            .collection('requests')
+            .where('requesterId', isEqualTo: user.uid)
+            .where('status', whereIn: ['active', 'accepted'])
+            .get();
+
+        final completedSnapshot = await FirebaseFirestore.instance
+            .collection('requests')
+            .where('requesterId', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'completed')
+            .get();
+
+        if (mounted) {
+          setState(() {
+            _activeRequests = activeSnapshot.docs.length;
+            _completedRequests = completedSnapshot.docs.length;
+          });
+        }
+      } catch (e) {
+        print('Error loading request stats: $e');
+      }
     }
   }
 
@@ -51,13 +101,12 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> {
     Navigator.pushNamed(context, '/recipient/alerts');
   }
 
-  // keep completion flow as a separate route (your existing screen)
   void _openProfileCompletion() async {
     await Navigator.pushNamed(context, '/recipient_profile_completion');
     fetchProfileStatus();
+    _loadRequestStats();
   }
 
-  // open the new viewer/editor screen
   void _openProfile() {
     Navigator.pushNamed(context, '/recipient/profile');
   }
@@ -66,368 +115,416 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> {
   Widget build(BuildContext context) {
     if (profileCompleted == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Recipient Dashboard')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading...'),
+            ],
+          ),
+        ),
       );
     }
 
     final canUseFeatures = profileCompleted ?? false;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F9FB),
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        title: Text('Recipient Dashboard'),
+        backgroundColor: Color(0xFF67D5B5),
+        foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Recipient Dashboard'),
-        centerTitle: true,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
-      ),
-      floatingActionButton: canUseFeatures
-          ? FloatingActionButton.extended(
-        onPressed: _openRequestBlood,
-        icon: const Icon(Icons.add),
-        label: const Text('Request Blood'),
-        backgroundColor: const Color(0xFF67D5B5),
-      )
-          : null,
-      body: Stack(
-        children: [
-          // Decorative background blobs
-          Positioned(
-            top: -60,
-            left: -40,
-            child: _blob(140, const Color(0x3367D5B5)),
-          ),
-          Positioned(
-            bottom: -50,
-            right: -30,
-            child: _blob(120, const Color(0x334AB9C5)),
-          ),
-
-          // Content
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _HeaderCard(
-                    isComplete: profileCompleted!,
-                    onCompleteTap: _openProfileCompletion, // <-- go to completion flow
-                  ),
-                  const SizedBox(height: 22),
-                  Expanded(
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      childAspectRatio: 0.93,
-                      mainAxisSpacing: 18,
-                      crossAxisSpacing: 18,
-                      children: [
-                        _buildFeatureTile(
-                          icon: Icons.bloodtype,
-                          title: "Request Blood",
-                          enabled: canUseFeatures,
-                          onTap: _openRequestBlood,
-                        ),
-                        _buildFeatureTile(
-                          icon: Icons.history,
-                          title: "My Requests",
-                          enabled: canUseFeatures,
-                          onTap: _openMyRequests,
-                        ),
-                        _buildFeatureTile(
-                          icon: Icons.notifications_active,
-                          title: "Alerts",
-                          enabled: canUseFeatures,
-                          onTap: _openAlerts,
-                          badge: true, // small visual hint; no logic change
-                        ),
-                        _buildFeatureTile(
-                          icon: Icons.account_circle,
-                          title: "My Profile",
-                          enabled: true, // Always accessible
-                          onTap: _openProfile, // <-- open viewer/editor
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!canUseFeatures)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Text(
-                        "Complete your profile to access all features.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.red[700],
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.person),
+            onPressed: _openProfile,
           ),
         ],
       ),
-    );
-  }
+      floatingActionButton: canUseFeatures ? FloatingActionButton(
+        onPressed: _openRequestBlood,
+        backgroundColor: Color(0xFF67D5B5),
+        child: Icon(Icons.add, color: Colors.white),
+      ) : null,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Welcome Section
+              _buildWelcomeSection(),
+              SizedBox(height: 24),
 
-  // ---------- UI helpers below (visual upgrades only) ----------
+              // Profile Status
+              _buildProfileStatusCard(canUseFeatures),
+              SizedBox(height: 24),
 
-  Widget _blob(double size, Color color) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
+              // Stats Section
+              if (canUseFeatures) _buildStatsSection(),
+              if (canUseFeatures) SizedBox(height: 24),
+
+              // Quick Actions
+              _buildQuickActions(canUseFeatures),
+              SizedBox(height: 24),
+
+              // Profile Reminder
+              if (!canUseFeatures) _buildProfileReminder(),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFeatureTile({
-    required IconData icon,
-    required String title,
-    bool enabled = true,
-    VoidCallback? onTap,
-    bool badge = false,
-  }) {
-    final borderRadius = BorderRadius.circular(18);
-
-    // Gradient border illusion: outer gradient + inner white card
-    final outer = Container(
+  Widget _buildWelcomeSection() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: enabled
-              ? const [Color(0xFF67D5B5), Color(0xFF4AB9C5)]
-              : [Colors.grey.shade300, Colors.grey.shade300],
+          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: borderRadius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            spreadRadius: 1,
-            offset: const Offset(0, 4),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Welcome back,',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 16,
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            _userName?.split(' ').first ?? 'Recipient',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Ready to request blood?',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 14,
+            ),
           ),
         ],
       ),
     );
+  }
 
-    final inner = Container(
-      margin: const EdgeInsets.all(1.4),
+  Widget _buildProfileStatusCard(bool canUseFeatures) {
+    return Container(
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: borderRadius,
-      ),
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: enabled
-                        ? const [Color(0xFFE3F7F2), Color(0xFFD2F1F3)]
-                        : [Colors.grey.shade200, Colors.grey.shade200],
-                  ),
-                ),
-                child: Icon(
-                  icon,
-                  size: 30,
-                  color: enabled ? const Color(0xFF30B7A2) : Colors.grey,
-                ),
-              ),
-              if (badge)
-                Positioned(
-                  right: -2,
-                  top: -2,
-                  child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: enabled ? const Color(0xFFEF5350) : Colors.grey,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15.5,
-              color: enabled ? Colors.blueGrey[900] : Colors.grey,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
-      ),
-    );
-
-    final tile = AnimatedOpacity(
-      duration: const Duration(milliseconds: 180),
-      opacity: enabled ? 1 : 0.42,
-      child: AnimatedScale(
-        duration: const Duration(milliseconds: 120),
-        scale: 1.0,
-        child: Stack(
-          children: [
-            outer,
-            inner,
-            // ripple on tap (material ink effect)
-            Positioned.fill(
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: borderRadius,
-                  splashColor: enabled ? const Color(0x2167D5B5) : Colors.transparent,
-                  highlightColor: enabled ? const Color(0x1167D5B5) : Colors.transparent,
-                  onTap: enabled ? onTap : null,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    return tile;
-  }
-}
-
-class _HeaderCard extends StatelessWidget {
-  final bool isComplete;
-  final VoidCallback onCompleteTap;
-
-  const _HeaderCard({
-    required this.isComplete,
-    required this.onCompleteTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final gradient = const LinearGradient(
-      colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF67D5B5).withOpacity(0.25),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
+            color: Colors.black12,
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
         ],
       ),
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.20),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.45)),
-            ),
-            child: Icon(
-              isComplete ? Icons.verified_rounded : Icons.assignment_ind_outlined,
-              size: 30,
-              color: Colors.white,
-            ),
+          Icon(
+            canUseFeatures ? Icons.verified : Icons.info,
+            color: canUseFeatures ? Colors.green : Colors.orange,
+            size: 40,
           ),
-          const SizedBox(width: 16),
+          SizedBox(width: 16),
           Expanded(
-            child: _HeaderText(isComplete: isComplete),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  canUseFeatures ? 'Profile Complete' : 'Complete Profile',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  canUseFeatures
+                      ? 'You can access all features'
+                      : 'Finish setup to request blood',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
           ),
-          if (!isComplete)
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF2C8D7C),
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              ),
-              onPressed: onCompleteTap,
-              icon: const Icon(Icons.edit_rounded, size: 18),
-              label: const Text(
-                'Complete Profile',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
+          if (!canUseFeatures)
+            IconButton(
+              onPressed: _openProfileCompletion,
+              icon: Icon(Icons.arrow_forward, color: Color(0xFF67D5B5)),
             ),
         ],
       ),
     );
   }
-}
 
-class _HeaderText extends StatelessWidget {
-  final bool isComplete;
-  const _HeaderText({required this.isComplete});
-
-  @override
-  Widget build(BuildContext context) {
-    final title = isComplete ? "Your profile is complete!" : "Complete your profile to unlock features";
-    final subtitle = isComplete
-        ? "You can now request blood and view your requests."
-        : "Finish a few details so we can enable all features.";
-
+  Widget _buildStatsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-            fontSize: 16.5,
-            letterSpacing: 0.2,
+          'Your Requests',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          subtitle,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.9),
-            fontWeight: FontWeight.w500,
+        SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _StatItem(
+                value: _activeRequests.toString(),
+                label: 'Active',
+                color: Color(0xFFFFA726),
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _StatItem(
+                value: _completedRequests.toString(),
+                label: 'Completed',
+                color: Color(0xFF4CAF50),
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _StatItem(
+                value: (_activeRequests + _completedRequests).toString(),
+                label: 'Total',
+                color: Color(0xFF67D5B5),
+              ),
+            ),
+          ],
+        ),
+        if (_bloodType != null) ...[
+          SizedBox(height: 16),
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red[100]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.bloodtype, color: Colors.red, size: 24),
+                SizedBox(width: 12),
+                Text(
+                  'Blood Type: ',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  _bloodType!,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
           ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildQuickActions(bool canUseFeatures) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick Actions',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: 16),
+        GridView.count(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          childAspectRatio: 1.2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: [
+            _ActionCard(
+              title: 'Request Blood',
+              icon: Icons.bloodtype,
+              color: Color(0xFF67D5B5),
+              enabled: canUseFeatures,
+              onTap: _openRequestBlood,
+            ),
+            _ActionCard(
+              title: 'My Requests',
+              icon: Icons.history,
+              color: Color(0xFFFFA726),
+              enabled: canUseFeatures,
+              onTap: _openMyRequests,
+            ),
+            _ActionCard(
+              title: 'Alerts',
+              icon: Icons.notifications,
+              color: Color(0xFFEF5350),
+              enabled: canUseFeatures,
+              onTap: _openAlerts,
+            ),
+            _ActionCard(
+              title: 'Profile',
+              icon: Icons.person,
+              color: Color(0xFF9575CD),
+              enabled: true,
+              onTap: _openProfile,
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildProfileReminder() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[100]!),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info, color: Colors.orange[800]),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Complete your profile to request blood',
+              style: TextStyle(color: Colors.orange[800]),
+            ),
+          ),
+          TextButton(
+            onPressed: _openProfileCompletion,
+            child: Text('Complete'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatItem extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color color;
+
+  const _StatItem({
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionCard extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _ActionCard({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: enabled ? color : Colors.grey,
+                size: 32,
+              ),
+              SizedBox(height: 8),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: enabled ? Colors.black87 : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -122,7 +122,8 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
           Positioned(top: 100, right: -30, child: _blob(80, const Color(0x15FF6B6B))),
 
           SafeArea(
-            child: Padding(
+            child: SingleChildScrollView( // Wrap with SingleChildScrollView
+              physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,8 +148,9 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
                   _buildRecentActivityHeader(),
                   const SizedBox(height: 12),
 
-                  // Recent Donations
-                  Expanded(child: _buildRecentDonations()),
+                  // Recent Donations - Fixed height container
+                  _buildRecentDonations(),
+                  const SizedBox(height: 20), // Add bottom padding
                 ],
               ),
             ),
@@ -245,8 +247,8 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
       child: Row(
         children: [
           Container(
-            width: 60,
-            height: 60,
+            width: 50, // Reduced size
+            height: 50, // Reduced size
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
@@ -255,7 +257,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
             child: Icon(
               _isAvailable ? Icons.volunteer_activism : Icons.volunteer_activism_outlined,
               color: Colors.white,
-              size: 30,
+              size: 24, // Reduced icon size
             ),
           ),
           const SizedBox(width: 16),
@@ -267,7 +269,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
                   _isAvailable ? 'Available to Donate' : 'Currently Unavailable',
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 16, // Reduced font size
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -278,14 +280,14 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
                       : 'Turn on to receive requests',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.8),
-                    fontSize: 14,
+                    fontSize: 12, // Reduced font size
                   ),
                 ),
               ],
             ),
           ),
           Transform.scale(
-            scale: 1.2,
+            scale: 1.1, // Slightly reduced scale
             child: Switch(
               value: _isAvailable,
               onChanged: _toggle,
@@ -344,7 +346,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
         if (!ready)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12), // Reduced padding
             decoration: BoxDecoration(
               color: Colors.orange[50],
               borderRadius: BorderRadius.circular(12),
@@ -352,8 +354,8 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
             ),
             child: Row(
               children: [
-                Icon(Icons.info, color: Colors.orange[800]),
-                const SizedBox(width: 12),
+                Icon(Icons.info, color: Colors.orange[800], size: 20), // Smaller icon
+                const SizedBox(width: 8), // Reduced spacing
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -363,13 +365,15 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.orange[800],
+                          fontSize: 14, // Smaller font
                         ),
                       ),
+                      const SizedBox(height: 2), // Reduced spacing
                       Text(
                         'Finish your profile to start receiving requests',
                         style: TextStyle(
                           color: Colors.orange[700],
-                          fontSize: 12,
+                          fontSize: 11, // Smaller font
                         ),
                       ),
                     ],
@@ -377,9 +381,16 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
                 ),
                 TextButton(
                   onPressed: _openProfileCompletion,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8), // Smaller button
+                    minimumSize: Size.zero,
+                  ),
                   child: Text(
                     'Complete',
-                    style: TextStyle(color: Colors.orange[800]),
+                    style: TextStyle(
+                      color: Colors.orange[800],
+                      fontSize: 12, // Smaller font
+                    ),
                   ),
                 ),
               ],
@@ -405,9 +416,16 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
           onPressed: () {
             // Navigate to full history
           },
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: Size.zero,
+          ),
           child: const Text(
             'View All',
-            style: TextStyle(color: Color(0xFF67D5B5)),
+            style: TextStyle(
+              color: Color(0xFF67D5B5),
+              fontSize: 14,
+            ),
           ),
         ),
       ],
@@ -416,125 +434,135 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
 
   Widget _buildRecentDonations() {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid == null) return _buildEmptyState();
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('requests')
-          .where('acceptedBy', isEqualTo: uid)
-          .where('status', isEqualTo: 'completed')
-          .orderBy('completedAt', descending: true)
-          .limit(5)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    return Container(
+      height: 200, // Fixed height to prevent overflow
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('requests')
+            .where('acceptedBy', isEqualTo: uid)
+            .where('status', isEqualTo: 'completed')
+            .orderBy('completedAt', descending: true)
+            .limit(3) // Reduced limit
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return _buildEmptyState();
-        }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return _buildEmptyState();
+          }
 
-        final donations = snapshot.data!.docs;
+          final donations = snapshot.data!.docs;
 
-        return ListView.builder(
-          physics: const BouncingScrollPhysics(),
-          itemCount: donations.length,
-          itemBuilder: (context, index) {
-            final donation = donations[index];
-            final data = donation.data() as Map<String, dynamic>;
-            final completedAt = data['completedAt'] as Timestamp?;
-            final bloodType = data['bloodType'] ?? 'Unknown';
-            final hospital = data['hospital'] ?? 'Unknown Hospital';
-            final units = data['units'] ?? 1;
+          return ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            itemCount: donations.length,
+            itemBuilder: (context, index) {
+              final donation = donations[index];
+              final data = donation.data() as Map<String, dynamic>;
+              final completedAt = data['completedAt'] as Timestamp?;
+              final bloodType = data['bloodType'] ?? 'Unknown';
+              final hospital = data['hospital'] ?? 'Unknown Hospital';
+              final units = data['units'] ?? 1;
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                elevation: 2,
-                child: ListTile(
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF67D5B5).withOpacity(0.1),
-                      shape: BoxShape.circle,
+              return Container(
+                margin: const EdgeInsets.only(bottom: 6), // Reduced margin
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10), // Slightly smaller radius
+                  elevation: 1, // Reduced elevation
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Reduced padding
+                    leading: Container(
+                      width: 36, // Smaller leading
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF67D5B5).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.bloodtype,
+                        color: const Color(0xFF67D5B5),
+                        size: 18, // Smaller icon
+                      ),
                     ),
-                    child: Icon(
-                      Icons.bloodtype,
-                      color: const Color(0xFF67D5B5),
-                      size: 20,
-                    ),
-                  ),
-                  title: Text(
-                    hospital,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  subtitle: Text(
-                    completedAt != null
-                        ? '${_formatDate(completedAt.toDate())} • $units unit(s)'
-                        : '$units unit(s)',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      bloodType,
+                    title: Text(
+                      hospital,
                       style: const TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13, // Smaller font
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      completedAt != null
+                          ? '${_formatDate(completedAt.toDate())} • $units unit(s)'
+                          : '$units unit(s)',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 11, // Smaller font
+                      ),
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), // Smaller padding
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        bloodType,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11, // Smaller font
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.bloodtype_outlined,
-            size: 80,
-            color: Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No Donations Yet',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[400],
+    return Container(
+      height: 120, // Fixed height for empty state
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.bloodtype_outlined,
+              size: 40, // Smaller icon
+              color: Colors.grey[300],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your donation history will appear here',
-            style: TextStyle(
-              color: Colors.grey[400],
+            const SizedBox(height: 8),
+            Text(
+              'No Donations Yet',
+              style: TextStyle(
+                fontSize: 14, // Smaller font
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[400],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              'Your donation history will appear here',
+              style: TextStyle(
+                color: Colors.grey[400],
+                fontSize: 12, // Smaller font
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -581,15 +609,15 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12), // Reduced padding
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12), // Smaller radius
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -597,29 +625,29 @@ class _StatCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 36, // Smaller container
+            height: 36,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, color: color, size: 18), // Smaller icon
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8), // Reduced spacing
           Text(
             value,
             style: const TextStyle(
-              fontSize: 24,
+              fontSize: 20, // Smaller font
               fontWeight: FontWeight.bold,
               color: Color(0xFF2C3E50),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2), // Reduced spacing
           Text(
             label,
             style: TextStyle(
               color: Colors.grey[600],
-              fontSize: 12,
+              fontSize: 11, // Smaller font
             ),
           ),
         ],
@@ -650,14 +678,14 @@ class _QuickActionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: enabled ? color.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12), // Smaller radius
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12), // Reduced padding
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: enabled ? color.withOpacity(0.3) : Colors.grey.withOpacity(0.3),
             ),
@@ -668,24 +696,26 @@ class _QuickActionCard extends StatelessWidget {
               Icon(
                 icon,
                 color: enabled ? color : Colors.grey,
-                size: 24,
+                size: 20, // Smaller icon
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8), // Reduced spacing
               Text(
                 title,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: enabled ? color : Colors.grey,
-                  fontSize: 14,
+                  fontSize: 12, // Smaller font
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2), // Reduced spacing
               Text(
                 subtitle,
                 style: TextStyle(
                   color: enabled ? color.withOpacity(0.7) : Colors.grey,
-                  fontSize: 12,
+                  fontSize: 10, // Smaller font
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

@@ -146,6 +146,52 @@ class NotificationService {
     } else if (type == 'donation_completed') {
       // Navigate to completed requests
       Navigator.pushNamed(context, '/completed_requests', arguments: {'requestId': requestId});
+    } else if (type == 'blood_request_blood_bank') {
+      // Navigate to blood bank requests screen
+      Navigator.pushNamed(context, '/blood_bank_requests', arguments: {'requestId': requestId});
+    }
+  }
+
+  // Send blood request to blood bank
+  Future<void> sendBloodRequestToBloodBank({
+    required String bloodBankFcmToken,
+    required BloodRequest request,
+    required String bloodBankName,
+    required double distance,
+  }) async {
+    try {
+      final title = '🩸 Blood Request - ${request.bloodType}';
+      final body = '${request.units} unit(s) needed ${distance.toStringAsFixed(1)}km away. '
+          'Urgency: ${request.urgency.toUpperCase()}';
+
+      // Store notification in blood bank's inbox
+      await _storeNotificationInInbox(
+        userId: _getUserIdFromToken(bloodBankFcmToken),
+        title: title,
+        body: body,
+        type: 'blood_request_blood_bank',
+        requestId: request.id,
+      );
+
+      // Send push notification
+      await _sendPushNotification(
+        token: bloodBankFcmToken,
+        title: title,
+        body: body,
+        data: {
+          'type': 'blood_request_blood_bank',
+          'requestId': request.id,
+          'bloodType': request.bloodType,
+          'units': request.units.toString(),
+          'urgency': request.urgency,
+          'distance': distance.toStringAsFixed(1),
+          'bloodBankName': bloodBankName,
+        },
+      );
+
+      print('Blood request notification sent to blood bank: $bloodBankName');
+    } catch (e) {
+      print('Error sending blood bank notification: $e');
     }
   }
 
@@ -161,7 +207,7 @@ class NotificationService {
 
       // Store notification in user's inbox
       await _storeNotificationInInbox(
-        userId: _getUserIdFromToken(donorFcmToken), // Extract user ID from token context
+        userId: _getUserIdFromToken(donorFcmToken),
         title: title,
         body: body,
         type: 'blood_request',
@@ -225,7 +271,7 @@ class NotificationService {
     }
   }
 
-  // NEW: Send donation completed notification
+  // Send donation completed notification
   Future<void> sendDonationCompletedNotification({
     required String recipientFcmToken,
     required String requestId,
@@ -372,7 +418,7 @@ class NotificationService {
     }
   }
 
-  // NEW: Simple sendNotification method for RequestProvider compatibility
+  // Simple sendNotification method for RequestProvider compatibility
   Future<void> sendNotification({
     required String title,
     required String body,
