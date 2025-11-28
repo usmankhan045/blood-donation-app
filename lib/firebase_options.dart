@@ -19,31 +19,28 @@ class DefaultFirebaseOptions {
     if (kIsWeb) {
       throw UnsupportedError(
         'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
+            'you can reconfigure this by running the FlutterFire CLI again.',
       );
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios; // ✅ Fixed: Added iOS support
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+              'you can reconfigure this by running the FlutterFire CLI again.',
         );
       case TargetPlatform.windows:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+              'you can reconfigure this by running the FlutterFire CLI again.',
         );
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+              'you can reconfigure this by running the FlutterFire CLI again.',
         );
       default:
         throw UnsupportedError(
@@ -58,5 +55,15 @@ class DefaultFirebaseOptions {
     messagingSenderId: '774967899570',
     projectId: 'real-time-blood-donation-app',
     storageBucket: 'real-time-blood-donation-app.firebasestorage.app',
+  );
+
+  // ✅ Added iOS configuration (you'll need to add iOS app in Firebase Console)
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyAbbuPfPD80cCtb8h6C-P6zb7qQd6xh_9Q', // Use your iOS API key
+    appId: '1:774967899570:ios:xxxxxxxxxxxxxxxxxxxx', // Add your iOS app ID
+    messagingSenderId: '774967899570',
+    projectId: 'real-time-blood-donation-app',
+    storageBucket: 'real-time-blood-donation-app.firebasestorage.app',
+    iosBundleId: 'com.example.blood', // Add your iOS bundle ID
   );
 }

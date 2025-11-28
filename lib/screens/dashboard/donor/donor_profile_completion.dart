@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:blood_donation_app/services/location_service.dart';
 
 class DonorProfileCompletionScreen extends StatefulWidget {
   @override
@@ -27,6 +29,8 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
   bool healthy = false;
   String? frequency;
   XFile? profileImage;
+  Position? _currentLocation;
+  bool _isLoadingLocation = false;
 
   final List<String> bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
   final List<String> genders = ['Male', 'Female', 'Other'];
@@ -44,7 +48,8 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
     if (healthy) filled++;
     if (frequency != null) filled++;
     if (emergencyCtrl.text.isNotEmpty) filled++;
-    return filled / 10;
+    if (_currentLocation != null) filled++; // Add location to completion score
+    return filled / 11; // Updated from 10 to 11
   }
 
   // Validation functions
@@ -129,6 +134,35 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
     if (img != null) setState(() => profileImage = img);
   }
 
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLoadingLocation = true);
+
+    Position? position = await LocationService.getCurrentLocation();
+
+    setState(() {
+      _currentLocation = position;
+      _isLoadingLocation = false;
+    });
+
+    if (position == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Could not get location. Please enable location services.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Location captured successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
   Future<void> saveProfile() async {
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -139,6 +173,16 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
     if (!healthy) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Please confirm you are healthy to donate")));
+      return;
+    }
+
+    if (_currentLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('📍 Please capture your location to continue'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
@@ -171,6 +215,11 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
         'isAvailable': true, // Default available status
         'lastDonationDate': null,
         'totalDonations': 0,
+        'location': GeoPoint(
+          _currentLocation!.latitude,
+          _currentLocation!.longitude,
+        ),
+        'locationAddress': addressCtrl.text.trim(),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -194,9 +243,9 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
         ),
       );
 
-      // Navigate back only if profile is 100% complete
+      // ✅ UPDATED: Redirect to donor dashboard when profile is 100% complete
       if (completionScore == 1.0) {
-        Navigator.pop(context, true);
+        Navigator.pushReplacementNamed(context, '/donor_dashboard');
       }
 
     } catch (e) {
@@ -419,6 +468,123 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
               ),
               SizedBox(height: 14),
 
+              // Location Capture Card
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.my_location, color: Colors.blue),
+                          SizedBox(width: 8),
+                          Text(
+                            'Location *',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Your location is required to match you with nearby blood requests. This helps save lives faster!',
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+
+                      if (_currentLocation != null)
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.green[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.green, size: 24),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Location Captured',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green[800],
+                                      ),
+                                    ),
+                                    Text(
+                                      'Lat: ${_currentLocation!.latitude.toStringAsFixed(4)}, Lng: ${_currentLocation!.longitude.toStringAsFixed(4)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.orange[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.location_off, color: Colors.orange, size: 24),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Location required to help nearby patients',
+                                  style: TextStyle(
+                                    color: Colors.orange[800],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      SizedBox(height: 12),
+
+                      ElevatedButton.icon(
+                        onPressed: _isLoadingLocation ? null : _getCurrentLocation,
+                        icon: _isLoadingLocation
+                            ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                            : Icon(Icons.my_location),
+                        label: Text(_isLoadingLocation ? 'Getting Location...' : 'Capture My Location'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue[600],
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 14),
+
               // Health Check
               Card(
                 elevation: 2,
@@ -482,24 +648,29 @@ class _DonorProfileCompletionScreenState extends State<DonorProfileCompletionScr
               ),
               SizedBox(height: 24),
 
-              // Save Button
-              ElevatedButton.icon(
-                icon: _isLoading
-                    ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Icon(Icons.save_alt),
-                label: Text(
-                  completionScore == 1.0 ? "Complete Profile" : "Save Progress",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: completionScore == 1.0 ? Colors.green : Color(0xFF67D5B5),
-                  padding: EdgeInsets.symmetric(vertical: 15),
-                  textStyle: TextStyle(fontSize: 17),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(13),
+              // Save Button - UPDATED TEXT
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton.icon(
+                  icon: _isLoading
+                      ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Icon(Icons.save_alt),
+                  label: Text(
+                    // UPDATED BUTTON TEXT
+                    completionScore == 1.0 ? "Complete Profile & Go to Dashboard" : "Save Progress",
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: completionScore == 1.0 ? Colors.green : Color(0xFF67D5B5),
+                    padding: EdgeInsets.symmetric(vertical: 15),
+                    textStyle: TextStyle(fontSize: 17),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                  ),
+                  onPressed: _isLoading ? null : saveProfile,
                 ),
-                onPressed: _isLoading ? null : saveProfile,
               ),
             ],
           ),

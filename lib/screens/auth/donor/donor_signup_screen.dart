@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:blood_donation_app/screens/dashboard/donor/donor_profile_completion.dart';
 
 class DonorSignUpScreen extends StatefulWidget {
   const DonorSignUpScreen({Key? key}) : super(key: key);
@@ -46,17 +47,37 @@ class _DonorSignUpScreenState extends State<DonorSignUpScreen> {
         await userDoc.set({
           'email': userCred.user!.email,
           'role': 'donor',
+          'profileCompleted': false, // ADD THIS
           'createdAt': FieldValue.serverTimestamp(),
         });
+
+        // REDIRECT TO PROFILE COMPLETION - ADD THIS
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => DonorProfileCompletionScreen(),
+          ),
+        );
       } else if (userSnapshot['role'] != 'donor') {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Not a donor account.')),
         );
         setState(() => _isLoading = false);
         return;
+      } else {
+        // If user exists and is donor, check if profile is completed
+        if (userSnapshot['profileCompleted'] == true) {
+          Navigator.pushReplacementNamed(context, '/donor_dashboard');
+        } else {
+          // REDIRECT TO PROFILE COMPLETION - ADD THIS
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DonorProfileCompletionScreen(),
+            ),
+          );
+        }
       }
-
-      Navigator.pushReplacementNamed(context, '/donor_dashboard');
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message ?? 'Firebase Auth error')),
@@ -81,9 +102,12 @@ class _DonorSignUpScreenState extends State<DonorSignUpScreen> {
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
       );
+
+      // Create user document with profileCompleted flag
       await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
         'email': _emailCtrl.text.trim(),
         'role': 'donor',
+        'profileCompleted': false, // ADD THIS
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -94,20 +118,26 @@ class _DonorSignUpScreenState extends State<DonorSignUpScreen> {
         _isLoading = false;
       });
 
-      // Popup
+      // Popup - UPDATED TO REDIRECT TO PROFILE COMPLETION
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
           title: Text('Verify Your Email'),
-          content: Text('A verification link has been sent to your email. Please verify your email before logging in.'),
+          content: Text('A verification link has been sent to your email. Please complete your profile to start saving lives.'),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                Navigator.pushReplacementNamed(context, '/donor_login');
+                // REDIRECT TO PROFILE COMPLETION INSTEAD OF LOGIN - UPDATED THIS
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DonorProfileCompletionScreen(),
+                  ),
+                );
               },
-              child: Text('OK'),
+              child: Text('Complete Profile'),
             ),
           ],
         ),

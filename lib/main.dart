@@ -26,7 +26,8 @@ import 'package:blood_donation_app/screens/dashboard/recipient/recipient_my_requ
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_profile_completion.dart';
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_profile_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_request_screen.dart';
-import 'package:blood_donation_app/services/notification_service.dart';
+import 'package:blood_donation_app/services/service_locator.dart';
+import 'package:blood_donation_app/services/location_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -51,12 +52,21 @@ void main() async {
     print('❌ Firebase initialization error: $e');
   }
 
-  // Initialize notifications (but don't block app startup)
-  WidgetsFlutterBinding.ensureInitialized();
-  final notificationService = NotificationService();
-  notificationService.initializeFCM().catchError((e) {
-    print('❌ FCM initialization error: $e');
-  });
+  // ✅ ADDED: Initialize Service Locator FIRST
+  try {
+    ServiceLocator().initialize();
+    print('✅ ServiceLocator initialized successfully');
+  } catch (e) {
+    print('❌ ServiceLocator initialization error: $e');
+  }
+
+  // Initialize location permissions
+  try {
+    await LocationService.requestLocationPermission();
+    print('✅ Location permissions requested successfully');
+  } catch (e) {
+    print('❌ Location permission error: $e');
+  }
 
   runApp(BloodDonationApp());
 }
@@ -75,16 +85,15 @@ class BloodDonationApp extends StatelessWidget {
         title: 'Blood Donation App',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          primaryColor: Color(0xFF67D5B5),
-          scaffoldBackgroundColor: Color(0xFFF6F9FB),
+          primaryColor: const Color(0xFF67D5B5),
+          scaffoldBackgroundColor: const Color(0xFFF6F9FB),
           fontFamily: 'Roboto',
           visualDensity: VisualDensity.adaptivePlatformDensity,
           colorScheme: ColorScheme.fromSwatch().copyWith(
-            primary: Color(0xFF67D5B5),
-            secondary: Color(0xFF4AB9C5),
+            primary: const Color(0xFF67D5B5),
+            secondary: const Color(0xFF4AB9C5),
           ),
         ),
-        navigatorKey: NotificationService.navigatorKey,
         home: const SplashScreen(),
         routes: {
           // Common Routes
@@ -111,7 +120,7 @@ class BloodDonationApp extends StatelessWidget {
           '/blood_bank_dashboard': (context) => const BloodBankDashboardScreen(),
           '/admin_dashboard': (context) => const AdminDashboardScreen(),
 
-          // Profile Completion Routes
+          // Profile Completion Routes - NOW USING DASHBOARD VERSION
           '/donor_profile_completion': (context) => DonorProfileCompletionScreen(),
           '/recipient_profile_completion': (context) => RecipientProfileCompletionScreen(),
           '/hospital_profile_completion': (context) => HospitalProfileCompletionScreen(),
@@ -130,6 +139,10 @@ class BloodDonationApp extends StatelessWidget {
           // NEW SCREENS - Add these routes
           '/my_requests': (context) => const MyRequestsScreen(),
           '/donor_requests': (context) => const DonorRequestsScreen(),
+
+          // Additional notification routes
+          '/completed_requests': (context) => const MyRequestsScreen(),
+          '/blood_bank_requests': (context) => const BloodBankDashboardScreen(),
         },
       ),
     );

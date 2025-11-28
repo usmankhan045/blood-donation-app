@@ -1,11 +1,12 @@
-// lib/screens/dashboard/donor/donor_requests_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-
-import '../../../services/donor_service.dart';
-import '../../../services/notification_service.dart';
 import '../../../models/blood_request_model.dart';
+import '../../../providers/request_provider.dart';
+import '../../../widgets/request_card.dart';
+import '../../../widgets/countdown_timer.dart';
+import '../../../services/donor_matching_service.dart';
 
 class DonorRequestsScreen extends StatefulWidget {
   const DonorRequestsScreen({super.key});
@@ -14,42 +15,613 @@ class DonorRequestsScreen extends StatefulWidget {
   State<DonorRequestsScreen> createState() => _DonorRequestsScreenState();
 }
 
-class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
-  final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
-  final DonorService _donorService = DonorService();
-  final NotificationService _notificationService = NotificationService();
+class _DonorRequestsScreenState extends State<DonorRequestsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  String _selectedFilter = 'all';
+  final List<String> _statusFilters = ['all', 'active', 'accepted', 'completed'];
 
-  Future<Map<String, dynamic>?> _loadDonorProfile() async {
-    final uid = _auth.currentUser!.uid;
-    final doc = await _firestore.collection('users').doc(uid).get();
-    return doc.data();
+  final DonorMatchingService _donorMatchingService = DonorMatchingService();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Stream for incoming requests where donor is in potentialDonors
+  Stream<List<BloodRequest>>? _incomingRequestsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _initializeStreams();
+
+    // Initialize the provider when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<RequestProvider>(context, listen: false);
+      provider.initialize();
+    });
   }
 
-  // Get available requests for current donor using DonorService
-  Stream<List<BloodRequest>> _getAvailableRequests(String bloodType) {
-    return _donorService.getAvailableRequests();
+  void _initializeStreams() {
+    final userId = _auth.currentUser?.uid;
+    if (userId != null) {
+      // Stream for requests where this donor is in potentialDonors array
+      _incomingRequestsStream = _firestore
+          .collection('blood_requests')
+          .where('potentialDonors', arrayContains: userId)
+          .where('status', isEqualTo: 'pending')
+          .orderBy('createdAt', descending: true)
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+          .map((doc) => BloodRequest.fromDoc(doc)) // ✅ FIXED: Changed fromFirestore to fromDoc
+          .toList());
+
+      print('🎯 Started listening for incoming requests for donor: $userId');
+    }
   }
 
-  // Get accepted requests for current donor
-  Stream<List<BloodRequest>> _getAcceptedRequests() {
-    return _donorService.getAcceptedRequests();
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
-  Future<void> _acceptRequest(String requestId, String donorName) async {
-    try {
-      await _donorService.acceptRequest(requestId, donorName);
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Blood Requests'),
+        backgroundColor: Color(0xFF67D5B5),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.filter_list),
+            onPressed: _showFilterDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
+          tabs: const [
+            Tab(
+              icon: Icon(Icons.notifications_active),
+              text: 'Available Requests',
+            ),
+            Tab(
+              icon: Icon(Icons.check_circle),
+              text: 'My Accepted',
+            ),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // Available Requests Tab - NOW USING REAL-TIME STREAM
+          _buildAvailableRequestsStream(),
 
-      if (mounted) {
+          // Accepted Requests Tab
+          _buildAcceptedRequestsTab(),
+        ],
+      ),
+    );
+  }
+
+  // UPDATED: Use real-time stream for available requests
+  Widget _buildAvailableRequestsStream() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || _incomingRequestsStream == null) {
+      return _buildErrorState('User not logged in');
+    }
+
+    return StreamBuilder<List<BloodRequest>>(
+      stream: _incomingRequestsStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildLoadingState('Loading available requests...');
+        }
+
+        if (snapshot.hasError) {
+          return _buildErrorState('Error loading requests: ${snapshot.error}');
+        }
+
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return _buildEmptyState(
+            'No Available Requests',
+            'When new blood requests match your blood type and location,\nthey will appear here automatically.',
+            true,
+          );
+        }
+
+        final availableRequests = snapshot.data!;
+        final filteredRequests = _filterRequests(availableRequests, isAvailable: true);
+
+        print('📬 Displaying ${filteredRequests.length} available requests');
+
+        return _buildRequestsList(
+          requests: filteredRequests,
+          emptyMessage: 'No Available Requests',
+          emptyDescription: 'When new blood requests match your blood type,\nthey will appear here with countdown timers.',
+          showStatistics: true,
+          isDonorView: true,
+          isAvailableTab: true,
+        );
+      },
+    );
+  }
+
+  Widget _buildAcceptedRequestsTab() {
+    return Consumer<RequestProvider>(
+      builder: (context, provider, child) {
+        if (provider.isLoading) {
+          return _buildLoadingState('Loading your accepted requests...');
+        }
+
+        final acceptedRequests = provider.acceptedRequests;
+        final filteredAccepted = _filterRequests(acceptedRequests, isAvailable: false);
+
+        return _buildRequestsList(
+          requests: filteredAccepted,
+          emptyMessage: 'No Accepted Requests',
+          emptyDescription: 'Requests you accept will appear here.\nComplete them after donation.',
+          showStatistics: false,
+          provider: provider,
+          isDonorView: true,
+          isAvailableTab: false,
+        );
+      },
+    );
+  }
+
+  Widget _buildRequestsList({
+    required List<BloodRequest> requests,
+    required String emptyMessage,
+    required String emptyDescription,
+    required bool showStatistics,
+    RequestProvider? provider,
+    required bool isDonorView,
+    required bool isAvailableTab,
+  }) {
+    if (requests.isEmpty) {
+      return _buildEmptyState(emptyMessage, emptyDescription, isAvailableTab);
+    }
+
+    return Column(
+      children: [
+        // Statistics Overview for available requests
+        if (showStatistics) _buildStatisticsOverview(requests, isAvailableTab),
+
+        // Status Filter Chips
+        _buildStatusFilterChips(isAvailableTab),
+
+        // Requests List
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshData,
+            child: ListView.builder(
+              itemCount: requests.length,
+              padding: const EdgeInsets.all(8),
+              itemBuilder: (context, index) {
+                final request = requests[index];
+                return RequestCard(
+                  request: request,
+                  isRecipientView: false,
+                  onAccept: () => _acceptRequest(request, context),
+                  onViewDetails: () => _viewRequestDetails(request, context),
+                  onCancel: isAvailableTab ? null : () => _completeRequest(request, context, provider),
+                  showActions: true,
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadingState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF67D5B5)),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: const TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String errorMessage) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, size: 64, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            'Error loading requests',
+            style: TextStyle(fontSize: 18, color: Colors.grey[800]),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            errorMessage,
+            style: TextStyle(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _refreshData,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(0xFF67D5B5),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // UPDATED: Statistics based on actual stream data
+  Widget _buildStatisticsOverview(List<BloodRequest> requests, bool isAvailableTab) {
+    if (isAvailableTab) {
+      final availableCount = requests.length;
+      final urgentCount = requests.where((r) => r.isUrgent).length;
+      final expiringSoonCount = requests.where((r) => r.isAboutToExpire).length;
+      final criticalCount = requests.where((r) => r.isCritical).length;
+
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.notifications_active, color: Color(0xFF67D5B5), size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Live Requests',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Color(0xFF67D5B5).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$availableCount request${availableCount != 1 ? 's' : ''}',
+                    style: TextStyle(
+                      color: Color(0xFF67D5B5),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Quick stats row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem('Total', availableCount, Colors.blue, Icons.bloodtype),
+                _buildStatItem('Urgent', urgentCount, Colors.orange, Icons.warning),
+                _buildStatItem('Critical', criticalCount, Colors.red, Icons.emergency),
+                _buildStatItem('Expiring', expiringSoonCount, Colors.orange, Icons.timer),
+              ],
+            ),
+          ],
+        ),
+      );
+    } else {
+      final acceptedCount = requests.length;
+      final completedCount = requests.where((r) => r.isCompleted).length;
+      final pendingCount = acceptedCount - completedCount;
+
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'My Accepted Requests',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem('Accepted', acceptedCount, Colors.green, Icons.check_circle),
+                _buildStatItem('Pending', pendingCount, Colors.orange, Icons.pending),
+                _buildStatItem('Completed', completedCount, Colors.blue, Icons.verified),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildStatItem(String label, int count, Color color, IconData icon) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            shape: BoxShape.circle,
+            border: Border.all(color: color),
+          ),
+          child: Icon(icon, size: 20, color: color),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusFilterChips(bool isAvailableTab) {
+    final filters = isAvailableTab
+        ? ['all', 'active', 'urgent', 'expiring']
+        : ['all', 'accepted', 'completed'];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: filters.map((status) {
+          return ChoiceChip(
+            label: Text(
+              _getStatusLabel(status, isAvailableTab),
+              style: TextStyle(
+                color: _selectedFilter == status ? Colors.white : Colors.black87,
+                fontSize: 12,
+              ),
+            ),
+            selected: _selectedFilter == status,
+            onSelected: (selected) {
+              setState(() => _selectedFilter = status);
+            },
+            selectedColor: Color(0xFF67D5B5),
+            backgroundColor: Colors.grey[200],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String message, String description, bool isAvailableTab) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            isAvailableTab ? Icons.bloodtype_outlined : Icons.check_circle_outline,
+            size: 80,
+            color: Colors.grey[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: TextStyle(
+              fontSize: 18,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              description,
+              style: TextStyle(color: Colors.grey[500]),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          if (isAvailableTab) ...[
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _refreshData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Color(0xFF67D5B5),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Check for New Requests'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<BloodRequest> _filterRequests(List<BloodRequest> requests, {required bool isAvailable}) {
+    if (_selectedFilter == 'all') {
+      return requests;
+    }
+
+    return requests.where((request) {
+      if (isAvailable) {
+        switch (_selectedFilter) {
+          case 'active':
+            return request.isActive;
+          case 'urgent':
+            return request.isUrgent;
+          case 'expiring':
+            return request.isAboutToExpire || request.isCritical;
+          default:
+            return true;
+        }
+      } else {
+        switch (_selectedFilter) {
+          case 'accepted':
+            return request.isAccepted;
+          case 'completed':
+            return request.isCompleted;
+          default:
+            return true;
+        }
+      }
+    }).toList();
+  }
+
+  String _getStatusLabel(String status, bool isAvailableTab) {
+    if (isAvailableTab) {
+      switch (status) {
+        case 'all': return 'All';
+        case 'active': return 'Active';
+        case 'urgent': return 'Urgent';
+        case 'expiring': return 'Expiring Soon';
+        default: return status;
+      }
+    } else {
+      switch (status) {
+        case 'all': return 'All';
+        case 'accepted': return 'Accepted';
+        case 'completed': return 'Completed';
+        default: return status;
+      }
+    }
+  }
+
+  Future<void> _refreshData() async {
+    setState(() {
+      _initializeStreams();
+    });
+
+    final provider = Provider.of<RequestProvider>(context, listen: false);
+    await provider.refreshAllData();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Refreshing requests...'),
+        backgroundColor: Color(0xFF67D5B5),
+      ),
+    );
+  }
+
+  // UPDATED: Accept request with proper donor matching service integration
+  Future<void> _acceptRequest(BloodRequest request, BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Accept Request?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Are you sure you want to accept this blood request?'),
+            const SizedBox(height: 8),
+            Text(
+              'Blood Type: ${request.bloodType}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text('Location: ${request.city}'),
+            Text('Units: ${request.units}'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Note: This request will be removed from other donors once you accept it.',
+                style: TextStyle(fontSize: 12, color: Colors.orange),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Accept Request'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final currentUserId = _auth.currentUser!.uid;
+
+        // Get donor name from user profile
+        final userDoc = await _firestore.collection('users').doc(currentUserId).get();
+        final userData = userDoc.data();
+        final donorName = userData?['fullName'] ?? 'Anonymous Donor';
+
+        // Remove this donor from potential donors of other requests
+        await _donorMatchingService.removeDonorFromPotentialDonors(request.id, currentUserId);
+
+        // Update request status to accepted
+        await _firestore.collection('blood_requests').doc(request.id).update({
+          'status': 'accepted',
+          'acceptedBy': currentUserId,
+          'acceptedAt': FieldValue.serverTimestamp(),
+          'acceptedDonorName': donorName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Refresh the data
+        _refreshData();
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Request accepted successfully!'),
+          const SnackBar(
+            content: Text('Request accepted successfully!'),
             backgroundColor: Colors.green,
           ),
         );
-      }
-    } catch (e) {
-      if (mounted) {
+      } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to accept request: $e'),
@@ -60,20 +632,37 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
     }
   }
 
-  Future<void> _completeRequest(String requestId) async {
-    try {
-      await _donorService.completeRequest(requestId);
+  Future<void> _completeRequest(BloodRequest request, BuildContext context, RequestProvider? provider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Complete Donation?'),
+        content: const Text('Confirm that you have completed the blood donation for this request.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Not Yet'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            child: const Text('Yes, Complete'),
+          ),
+        ],
+      ),
+    );
 
-      if (mounted) {
+    if (confirmed == true && provider != null) {
+      try {
+        await provider.completeRequest(request.id);
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Donation marked as completed!'),
+          const SnackBar(
+            content: Text('Donation marked as completed!'),
             backgroundColor: Colors.green,
           ),
         );
-      }
-    } catch (e) {
-      if (mounted) {
+      } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to complete request: $e'),
@@ -84,370 +673,152 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
     }
   }
 
-  Future<void> _declineRequest(String requestId) async {
-    try {
-      await _donorService.declineRequest(requestId);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Request declined'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to decline request: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+  void _viewRequestDetails(BloodRequest request, BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildRequestDetailsSheet(request, context),
+    );
   }
 
-  // Get urgency color
-  Color _getUrgencyColor(String urgency) {
-    switch (urgency.toLowerCase()) {
-      case 'emergency':
-        return Colors.red;
-      case 'high':
-        return Colors.orange;
-      case 'normal':
-        return Colors.blue;
-      case 'low':
-        return Colors.green;
-      default:
-        return Colors.grey;
-    }
-  }
+  Widget _buildRequestDetailsSheet(BloodRequest request, BuildContext context) {
+    final isAccepted = request.isAccepted || request.isCompleted;
 
-  // Get urgency icon
-  IconData _getUrgencyIcon(String urgency) {
-    switch (urgency.toLowerCase()) {
-      case 'emergency':
-        return Icons.emergency;
-      case 'high':
-        return Icons.warning_amber;
-      case 'normal':
-        return Icons.info;
-      case 'low':
-        return Icons.low_priority;
-      default:
-        return Icons.bloodtype;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: _loadDonorProfile(),
-      builder: (context, donorSnap) {
-        if (donorSnap.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final donor = donorSnap.data ?? {};
-        final userType = (donor['userType'] ?? donor['role'] ?? '').toString().toLowerCase();
-        final bloodType = (donor['bloodGroup'] ?? donor['bloodType'] ?? '').toString().toUpperCase();
-        final donorName = (donor['fullName'] ?? 'Donor').toString();
-
-        if (userType != 'donor' || bloodType.isEmpty) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Blood Requests')),
-            body: const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.bloodtype, size: 64, color: Colors.grey),
-                    SizedBox(height: 16),
-                    Text(
-                      'Donor Access Only',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'This screen is only available for registered donors with a blood type set in their profile.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isAccepted ? Colors.green : Color(0xFF67D5B5),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
               ),
             ),
-          );
-        }
-
-        return DefaultTabController(
-          length: 2,
-          child: Scaffold(
-            appBar: AppBar(
-              title: const Text('Blood Requests'),
-              bottom: const TabBar(
-                tabs: [
-                  Tab(icon: Icon(Icons.notifications_active), text: 'Available'),
-                  Tab(icon: Icon(Icons.check_circle), text: 'Accepted'),
-                ],
-              ),
-            ),
-            body: TabBarView(
+            child: Row(
               children: [
-                // Available Requests Tab
-                _buildAvailableRequestsTab(bloodType, donorName),
-                // Accepted Requests Tab
-                _buildAcceptedRequestsTab(),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildAvailableRequestsTab(String bloodType, String donorName) {
-    return StreamBuilder<List<BloodRequest>>(
-      stream: _getAvailableRequests(bloodType),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-
-        final requests = snapshot.data ?? [];
-        if (requests.isEmpty) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.bloodtype_outlined, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
-                Text(
-                  'No Active Requests',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'When new blood requests match your blood type,\nthey will appear here.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(12),
-          itemCount: requests.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final request = requests[index];
-            return _buildRequestCard(request, donorName, false);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildAcceptedRequestsTab() {
-    return StreamBuilder<List<BloodRequest>>(
-      stream: _getAcceptedRequests(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-
-        final requests = snapshot.data ?? [];
-        if (requests.isEmpty) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.check_circle_outline, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
-                Text(
-                  'No Accepted Requests',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Requests you accept will appear here.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(12),
-          itemCount: requests.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final request = requests[index];
-            return _buildRequestCard(request, '', true);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildRequestCard(BloodRequest request, String donorName, bool isAccepted) {
-    return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header with Blood Type and Urgency
-            Row(
-              children: [
-                Icon(Icons.bloodtype, color: Colors.red, size: 24),
+                Icon(Icons.info, color: Colors.white),
                 const SizedBox(width: 8),
                 Text(
-                  request.bloodType,
+                  isAccepted ? 'Accepted Request' : 'Request Details',
                   style: const TextStyle(
+                    color: Colors.white,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.red,
                   ),
                 ),
                 const Spacer(),
-                Chip(
-                  backgroundColor: _getUrgencyColor(request.urgency).withOpacity(0.1),
-                  label: Row(
-                    mainAxisSize: MainAxisSize.min,
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Status and Blood Type
+                  Row(
                     children: [
-                      Icon(
-                        _getUrgencyIcon(request.urgency),
-                        size: 16,
-                        color: _getUrgencyColor(request.urgency),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _getBloodTypeColor(request.bloodType),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          request.bloodType,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        request.urgency.toUpperCase(),
-                        style: TextStyle(
-                          color: _getUrgencyColor(request.urgency),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: request.statusColor.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: request.statusColor),
+                        ),
+                        child: Text(
+                          request.statusText.toUpperCase(),
+                          style: TextStyle(
+                            color: request.statusColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
 
-            // Request Details
-            _buildDetailRow(Icons.person, 'Requester:', request.requesterName),
-            _buildDetailRow(Icons.location_on, 'Location:', request.address),
-            _buildDetailRow(Icons.local_hospital, 'Hospital:', request.hospital ?? 'Not specified'),
-            _buildDetailRow(Icons.bloodtype, 'Units Needed:', '${request.units} unit(s)'),
+                  const SizedBox(height: 20),
 
-            if (request.notes?.isNotEmpty ?? false) ...[
-              _buildDetailRow(Icons.notes, 'Notes:', request.notes!),
-            ],
-
-            if (request.neededBy != null) ...[
-              _buildDetailRow(
-                Icons.calendar_today,
-                'Needed by:',
-                '${request.neededBy!.day}/${request.neededBy!.month}/${request.neededBy!.year}',
-              ),
-            ],
-
-            _buildDetailRow(
-              Icons.access_time,
-              'Posted:',
-              _friendlyTimestamp(request.createdAt ?? DateTime.now()),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Action Buttons
-            if (!isAccepted)
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _acceptRequest(request.id, donorName),
-                      icon: const Icon(Icons.check_circle, size: 20),
-                      label: const Text('Accept Request'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                  // Countdown Timer for active requests
+                  if (request.isActive) ...[
+                    Center(
+                      child: CountdownTimer(
+                        duration: request.timeRemaining ?? Duration.zero,
+                        request: request,
+                        size: 120,
+                        onExpired: () {
+                          Navigator.pop(context);
+                          _refreshData();
+                        },
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _declineRequest(request.id),
-                      icon: const Icon(Icons.cancel, size: 20),
-                      label: const Text('Decline'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _completeRequest(request.id),
-                      icon: const Icon(Icons.done_all, size: 20),
-                      label: const Text('Complete Donation'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+                    const SizedBox(height: 20),
+                  ],
 
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: const TextStyle(color: Colors.black87, fontSize: 14),
-                children: [
-                  TextSpan(
-                    text: '$label ',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  TextSpan(text: value),
+                  // Request Details
+                  _buildDetailSection('Requester Information', [
+                    _buildDetailItem('Requester Name', request.requesterName),
+                    _buildDetailItem('Contact Phone', request.phone ?? 'Not provided'),
+                  ]),
+
+                  _buildDetailSection('Request Information', [
+                    _buildDetailItem('Units Required', '${request.units} unit(s)'),
+                    _buildDetailItem('Urgency', request.urgency.toUpperCase(), request.urgencyColor),
+                    _buildDetailItem('Search Radius', '${request.searchRadius} km'),
+                  ]),
+
+                  _buildDetailSection('Location Information', [
+                    _buildDetailItem('City', request.city),
+                    _buildDetailItem('Address', request.address),
+                    if (request.hospital != null) _buildDetailItem('Hospital', request.hospital!),
+                  ]),
+
+                  if (request.notes != null && request.notes!.isNotEmpty)
+                    _buildDetailSection('Additional Notes', [
+                      _buildDetailItem('Notes', request.notes!),
+                    ]),
+
+                  _buildDetailSection('Timeline', [
+                    _buildDetailItem('Created', _formatDate(request.createdAt ?? DateTime.now())),
+                    if (request.neededBy != null) _buildDetailItem('Needed By', _formatDate(request.neededBy!)),
+                    if (request.acceptedAt != null) _buildDetailItem('Accepted At', _formatDate(request.acceptedAt!)),
+                  ]),
+
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
@@ -457,15 +828,115 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen> {
     );
   }
 
-  String _friendlyTimestamp(DateTime date) {
-    final now = DateTime.now();
-    final difference = now.difference(date);
+  Widget _buildDetailSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...children,
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
-    if (difference.inMinutes < 1) return 'Just now';
-    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
-    if (difference.inHours < 24) return '${difference.inHours}h ago';
-    if (difference.inDays < 7) return '${difference.inDays}d ago';
+  Widget _buildDetailItem(String label, String value, [Color? valueColor]) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.black87,
+                fontWeight: valueColor != null ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    return '${date.day}/${date.month}/${date.year}';
+  Color _getBloodTypeColor(String bloodType) {
+    switch (bloodType) {
+      case 'A+': return Colors.red.shade600;
+      case 'A-': return Colors.red.shade800;
+      case 'B+': return Colors.blue.shade600;
+      case 'B-': return Colors.blue.shade800;
+      case 'AB+': return Colors.purple.shade600;
+      case 'AB-': return Colors.purple.shade800;
+      case 'O+': return Colors.green.shade600;
+      case 'O-': return Colors.green.shade800;
+      default: return Colors.grey.shade600;
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    return '${_getWeekday(date.weekday)} ${date.day}/${date.month}/${date.year} at ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _getWeekday(int weekday) {
+    switch (weekday) {
+      case 1: return 'Mon';
+      case 2: return 'Tue';
+      case 3: return 'Wed';
+      case 4: return 'Thu';
+      case 5: return 'Fri';
+      case 6: return 'Sat';
+      case 7: return 'Sun';
+      default: return '';
+    }
+  }
+
+  void _showFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Filter Requests'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: _statusFilters.map((status) {
+              return ListTile(
+                leading: Radio<String>(
+                  value: status,
+                  groupValue: _selectedFilter,
+                  onChanged: (value) {
+                    setState(() => _selectedFilter = value!);
+                    Navigator.pop(context);
+                  },
+                ),
+                title: Text(_getStatusLabel(status, _tabController.index == 0)),
+                onTap: () {
+                  setState(() => _selectedFilter = status);
+                  Navigator.pop(context);
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
   }
 }

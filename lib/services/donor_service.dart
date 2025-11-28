@@ -1,13 +1,11 @@
 // lib/services/donor_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'notification_service.dart';
 import '../models/blood_request_model.dart';
 
 class DonorService {
   final _auth = FirebaseAuth.instance;
   final _fs = FirebaseFirestore.instance;
-  final NotificationService _notificationService = NotificationService();
 
   Future<void> toggleAvailability(bool isAvailable) async {
     final uid = _auth.currentUser!.uid;
@@ -30,35 +28,19 @@ class DonorService {
       final uid = _auth.currentUser!.uid;
 
       // Update request status to accepted
-      await _fs.collection('requests').doc(requestId).update({
+      await _fs.collection('blood_requests').doc(requestId).update({
         'status': 'accepted',
         'acceptedBy': uid,
-        'acceptedDonorName': donorName,
+        'acceptedByName': donorName,
+        'acceptedByType': 'donor',
         'acceptedAt': FieldValue.serverTimestamp(),
+        // Clear potential donors array
+        'potentialDonors': [],
       });
 
-      // Get recipient details for notification
-      final requestDoc = await _fs.collection('requests').doc(requestId).get();
-      final requestData = requestDoc.data();
-      final recipientId = requestData?['requesterId'];
-
-      if (recipientId != null) {
-        // Get recipient's FCM token
-        final recipientToken = await _getUserFcmToken(recipientId);
-
-        if (recipientToken != null) {
-          // Send notification to recipient
-          await _notificationService.sendRequestAcceptedNotification(
-            recipientFcmToken: recipientToken,
-            requestId: requestId,
-            donorName: donorName,
-          );
-        }
-      }
-
-      print('Request $requestId accepted by donor $uid');
+      print('✅ Request $requestId accepted by donor $uid');
     } catch (e) {
-      print('Error accepting request: $e');
+      print('❌ Error accepting request: $e');
       rethrow;
     }
   }
@@ -66,14 +48,14 @@ class DonorService {
   /// Decline a blood request
   Future<void> declineRequest(String requestId) async {
     try {
-      // Remove donor from notifiedDonors to avoid showing them this request again
-      await _fs.collection('requests').doc(requestId).update({
-        'notifiedDonors': FieldValue.arrayRemove([_auth.currentUser!.uid])
+      // Remove donor from potentialDonors to avoid showing them this request again
+      await _fs.collection('blood_requests').doc(requestId).update({
+        'potentialDonors': FieldValue.arrayRemove([_auth.currentUser!.uid])
       });
 
-      print('Donor declined request: $requestId');
+      print('✅ Donor declined request: $requestId');
     } catch (e) {
-      print('Error declining request: $e');
+      print('❌ Error declining request: $e');
     }
   }
 
@@ -85,44 +67,18 @@ class DonorService {
       final donorName = donorProfile?['fullName'] ?? 'A Donor';
 
       // Update request status to completed
-      await _fs.collection('requests').doc(requestId).update({
+      await _fs.collection('blood_requests').doc(requestId).update({
         'status': 'completed',
         'completedBy': uid,
         'completedAt': FieldValue.serverTimestamp(),
       });
 
-      // Get request details for notifications
-      final requestDoc = await _fs.collection('requests').doc(requestId).get();
-      final requestData = requestDoc.data();
-      final recipientId = requestData?['requesterId'];
-
-      // Send notifications to both donor and recipient
-      final donorToken = await _getUserFcmToken(uid);
-      final recipientToken = recipientId != null ? await _getUserFcmToken(recipientId) : null;
-
-      // Send completion notification to recipient
-      if (recipientToken != null) {
-        await _notificationService.sendDonationCompletedNotification(
-          recipientFcmToken: recipientToken,
-          requestId: requestId,
-          donorName: donorName,
-        );
-      }
-
-      // Send completion notification to donor
-      if (donorToken != null) {
-        await _notificationService.sendDonorCompletionNotification(
-          donorFcmToken: donorToken,
-          requestId: requestId,
-        );
-      }
-
       // Update donor's donation history
       await _updateDonorDonationHistory(uid);
 
-      print('Request $requestId marked as completed by donor $uid');
+      print('✅ Request $requestId marked as completed by donor $uid');
     } catch (e) {
-      print('Error completing request: $e');
+      print('❌ Error completing request: $e');
       rethrow;
     }
   }
@@ -132,14 +88,17 @@ class DonorService {
     final uid = _auth.currentUser!.uid;
 
     return _fs
-        .collection('requests')
-        .where('status', isEqualTo: 'active')
-        .where('notifiedDonors', arrayContains: uid)
+        .collection('blood_requests')
+        .where('status', isEqualTo: 'pending')
+        .where('potentialDonors', arrayContains: uid)
         .orderBy('urgency')
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => BloodRequest.fromDoc(doc))
+        .map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return BloodRequest.fromMap(data, doc.id);
+    })
         .toList());
   }
 
@@ -148,13 +107,17 @@ class DonorService {
     final uid = _auth.currentUser!.uid;
 
     return _fs
-        .collection('requests')
+        .collection('blood_requests')
         .where('acceptedBy', isEqualTo: uid)
+        .where('acceptedByType', isEqualTo: 'donor')
         .where('status', whereIn: ['accepted', 'completed'])
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => BloodRequest.fromDoc(doc))
+        .map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return BloodRequest.fromMap(data, doc.id);
+    })
         .toList());
   }
 
@@ -163,13 +126,17 @@ class DonorService {
     final uid = _auth.currentUser!.uid;
 
     return _fs
-        .collection('requests')
+        .collection('blood_requests')
         .where('acceptedBy', isEqualTo: uid)
+        .where('acceptedByType', isEqualTo: 'donor')
         .where('status', isEqualTo: 'completed')
         .orderBy('completedAt', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => BloodRequest.fromDoc(doc))
+        .map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return BloodRequest.fromMap(data, doc.id);
+    })
         .toList());
   }
 
@@ -188,20 +155,9 @@ class DonorService {
         'isAvailable': false, // Make donor unavailable after donation
       });
 
-      print('Updated donation history for donor $donorId');
+      print('✅ Updated donation history for donor $donorId');
     } catch (e) {
-      print('Error updating donor history: $e');
-    }
-  }
-
-  /// Get user's FCM token
-  Future<String?> _getUserFcmToken(String userId) async {
-    try {
-      final userDoc = await _fs.collection('users').doc(userId).get();
-      return userDoc.data()?['fcmToken'] as String?;
-    } catch (e) {
-      print('Error getting FCM token for user $userId: $e');
-      return null;
+      print('❌ Error updating donor history: $e');
     }
   }
 
@@ -212,7 +168,7 @@ class DonorService {
       final doc = await _fs.collection('users').doc(uid).get();
       return doc.data();
     } catch (e) {
-      print('Error getting donor profile: $e');
+      print('❌ Error getting donor profile: $e');
       return null;
     }
   }
@@ -226,9 +182,9 @@ class DonorService {
         'address': address,
         'locationUpdatedAt': FieldValue.serverTimestamp(),
       });
-      print('Donor location updated: $lat, $lng');
+      print('✅ Donor location updated: $lat, $lng');
     } catch (e) {
-      print('Error updating donor location: $e');
+      print('❌ Error updating donor location: $e');
     }
   }
 
@@ -239,15 +195,17 @@ class DonorService {
 
       // Get total donations
       final completedDonations = await _fs
-          .collection('requests')
+          .collection('blood_requests')
           .where('acceptedBy', isEqualTo: uid)
+          .where('acceptedByType', isEqualTo: 'donor')
           .where('status', isEqualTo: 'completed')
           .get();
 
       // Get pending accepted requests
       final pendingRequests = await _fs
-          .collection('requests')
+          .collection('blood_requests')
           .where('acceptedBy', isEqualTo: uid)
+          .where('acceptedByType', isEqualTo: 'donor')
           .where('status', isEqualTo: 'accepted')
           .get();
 
@@ -257,7 +215,7 @@ class DonorService {
         'livesSaved': completedDonations.docs.length, // Each donation saves a life
       };
     } catch (e) {
-      print('Error getting donor stats: $e');
+      print('❌ Error getting donor stats: $e');
       return {
         'totalDonations': 0,
         'pendingRequests': 0,
