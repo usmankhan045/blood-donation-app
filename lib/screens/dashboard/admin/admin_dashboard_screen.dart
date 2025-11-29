@@ -1,462 +1,567 @@
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'admin_reports_screen.dart';
 import 'admin_profile_screen.dart';
+import 'admin_verify_users_screen.dart';
+import 'admin_manage_users_screen.dart';
+import 'admin_manage_admins_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({Key? key}) : super(key: key);
 
   @override
-  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+  _AdminDashboardScreenState createState() => _AdminDashboardScreenState();
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  bool? profileCompleted;
-  bool _loading = false;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  int _totalUsers = 0;
+  int _totalRequests = 0;
+  int _completedDonations = 0;
+  int _activeDonors = 0;
+  int _pendingVerifications = 0;
+  bool _isLoading = true;
+  bool _isSuperAdmin = false;
+  String _adminName = 'Admin';
 
   @override
   void initState() {
     super.initState();
-    fetchProfileStatus();
+    print('=== INIT STATE CALLED ===');
+    _loadDashboardStats();
+    _checkSuperAdminStatus();
   }
 
-  Future<void> fetchProfileStatus() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (!mounted) return;
-      setState(() => profileCompleted = false);
-      return;
-    }
-    try {
-      setState(() => _loading = true);
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (!mounted) return;
-      setState(() {
-        profileCompleted = (doc.data()?['profileCompleted'] ?? false) as bool;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => profileCompleted = false);
-    } finally {
-      if (mounted) setState(() => _loading = false);
+  Future<void> _checkSuperAdminStatus() async {
+    final user = _auth.currentUser;
+    print('=== CHECKING SUPER ADMIN STATUS ===');
+    print('Current User UID: ${user?.uid}');
+    print('Current User Email: ${user?.email}');
+
+    if (user != null) {
+      try {
+        final userDoc = await _firestore.collection('users').doc(user.uid).get();
+        print('User Document Exists: ${userDoc.exists}');
+
+        if (userDoc.exists) {
+          final data = userDoc.data();
+          print('User Data: $data');
+
+          final isSuperAdmin = data?['isSuperAdmin'] ?? false;
+          final name = data?['name'] ?? 'Admin';
+
+          print('isSuperAdmin value: $isSuperAdmin');
+          print('User Name: $name');
+
+          setState(() {
+            _isSuperAdmin = isSuperAdmin;
+            _adminName = name;
+          });
+
+          print('=== SUPER ADMIN STATUS UPDATED ===');
+          print('_isSuperAdmin: $_isSuperAdmin');
+          print('_adminName: $_adminName');
+        } else {
+          print('User document does not exist in Firestore');
+        }
+      } catch (e) {
+        print('Error checking super admin status: $e');
+      }
+    } else {
+      print('No user is logged in');
     }
   }
 
-  Future<void> _openProfile() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AdminProfileScreen()),
+  Future<void> _loadDashboardStats() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    await Future.wait([
+      _loadUserStats(),
+      _loadRequestStats(),
+      _loadPendingVerifications(),
+    ]);
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _loadUserStats() async {
+    final usersSnapshot = await _firestore.collection('users').get();
+    final donorsSnapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'donor')
+        .where('isAvailable', isEqualTo: true)
+        .get();
+
+    setState(() {
+      _totalUsers = usersSnapshot.docs.length;
+      _activeDonors = donorsSnapshot.docs.length;
+    });
+  }
+
+  Future<void> _loadRequestStats() async {
+    final requestsSnapshot = await _firestore.collection('blood_requests').get();
+    final completedSnapshot = await _firestore
+        .collection('blood_requests')
+        .where('status', isEqualTo: 'completed')
+        .get();
+
+    setState(() {
+      _totalRequests = requestsSnapshot.docs.length;
+      _completedDonations = completedSnapshot.docs.length;
+    });
+  }
+
+  Future<void> _loadPendingVerifications() async {
+    final hospitalsSnapshot = await _firestore
+        .collection('hospitals')
+        .where('isVerified', isEqualTo: false)
+        .get();
+
+    final bloodBanksSnapshot = await _firestore
+        .collection('blood_banks')
+        .where('isVerified', isEqualTo: false)
+        .get();
+
+    setState(() {
+      _pendingVerifications = hospitalsSnapshot.docs.length + bloodBanksSnapshot.docs.length;
+    });
+  }
+
+  Widget _buildDashboardItem(BuildContext context, String title, String subtitle, IconData icon, Color color, VoidCallback onTap) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                color.withOpacity(0.15),
+                color.withOpacity(0.05),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (mounted) fetchProfileStatus();
   }
 
-  void _openProfileCompletion() {
-    Navigator.pushNamed(context, '/admin_profile_completion').then((_) => fetchProfileStatus());
+  Widget _buildStatusIndicator(String label, int count, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            count.toString(),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (profileCompleted == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Admin Dashboard')),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final bool isComplete = profileCompleted ?? false;
+    // Calculate total modules based on user role
+    final totalModules = _isSuperAdmin ? 4 : 3;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F9FB),
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        elevation: 0,
-        title: const Text('Admin Dashboard'),
-        centerTitle: true,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+        title: const Text(
+          'Admin Dashboard',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Colors.black87,
+            fontSize: 20,
           ),
         ),
-      ),
-      body: Stack(
-        children: [
-          Positioned(top: -60, left: -40, child: _blob(140, const Color(0x3367D5B5))),
-          Positioned(bottom: -50, right: -30, child: _blob(120, const Color(0x334AB9C5))),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+        actions: [
+          // Debug button to check Super Admin status
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: () {
+              print('=== MANUAL SUPER ADMIN CHECK ===');
+              print('_isSuperAdmin: $_isSuperAdmin');
+              print('_adminName: $_adminName');
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(_isSuperAdmin
+                      ? 'Super Admin: ACTIVE'
+                      : 'Super Admin: INACTIVE'
+                  ),
+                  backgroundColor: _isSuperAdmin ? Colors.green : Colors.orange,
+                ),
+              );
+            },
+          ),
+          if (_isSuperAdmin)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.purple.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.purple.withOpacity(0.3)),
+              ),
+              child: Row(
                 children: [
-                  _HeaderCard(
-                    isComplete: isComplete,
-                    onProfileTap: _openProfile,
-                    onCompleteTap: _openProfileCompletion,
-                    loading: _loading,
-                  ),
-                  const SizedBox(height: 18),
-
-                  // Quick stats (lightweight, non-blocking)
-                  _StatsRow(),
-
-                  const SizedBox(height: 18),
-
-                  Expanded(
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      childAspectRatio: 0.93,
-                      mainAxisSpacing: 18,
-                      crossAxisSpacing: 18,
-                      children: [
-                        _featureTile(
-                          icon: Icons.people,
-                          title: "Manage Users",
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Manage Users – coming soon')),
-                            );
-                          },
-                        ),
-                        _featureTile(
-                          icon: Icons.analytics_outlined,
-                          title: "Reports",
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Reports – coming soon')),
-                            );
-                          },
-                        ),
-                        _featureTile(
-                          icon: Icons.settings,
-                          title: "System Settings",
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Settings – coming soon')),
-                            );
-                          },
-                        ),
-                        _featureTile(
-                          icon: Icons.account_circle,
-                          title: "My Profile",
-                          onTap: _openProfile,
-                        ),
-                      ],
+                  Icon(Icons.star, color: Colors.purple, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Super Admin',
+                    style: TextStyle(
+                      color: Colors.purple,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-
-                  if (!isComplete)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        "Complete your profile to access all features.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.red[700],
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _blob(double size, Color color) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-      ),
-    );
-  }
-
-  Widget _featureTile({
-    required IconData icon,
-    required String title,
-    VoidCallback? onTap,
-  }) {
-    final borderRadius = BorderRadius.circular(18);
-
-    final outer = Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: borderRadius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            spreadRadius: 1,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-    );
-
-    final inner = Container(
-      margin: const EdgeInsets.all(1.4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: borderRadius,
-      ),
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [Color(0xFFE3F7F2), Color(0xFFD2F1F3)],
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                shape: BoxShape.circle,
               ),
+              child: const Icon(Icons.person, color: Colors.blue),
             ),
-            child: const Icon(Icons.apps, color: Color(0xFF30B7A2), size: 30),
+            onPressed: () {
+              Navigator.pushNamed(context, '/admin_profile');
+            },
           ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15.5,
-              color: Colors.blueGrey[900],
-              letterSpacing: 0.2,
-            ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadDashboardStats,
           ),
         ],
       ),
-    );
-
-    return Stack(
-      children: [
-        outer,
-        inner,
-        Positioned.fill(
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: borderRadius,
-              splashColor: const Color(0x2167D5B5),
-              highlightColor: const Color(0x1167D5B5),
-              onTap: onTap,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HeaderCard extends StatelessWidget {
-  final bool isComplete;
-  final VoidCallback onProfileTap;
-  final VoidCallback onCompleteTap;
-  final bool loading;
-
-  const _HeaderCard({
-    required this.isComplete,
-    required this.onProfileTap,
-    required this.onCompleteTap,
-    required this.loading,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF67D5B5).withOpacity(0.25),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Welcome Section
               Container(
-                width: 54,
-                height: 54,
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.20),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.45)),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.blue.withOpacity(0.3),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.admin_panel_settings, color: Colors.white, size: 30),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+                child: Row(
                   children: [
-                    _chip(isComplete ? 'Complete' : 'Incomplete',
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        _isSuperAdmin ? Icons.star : Icons.admin_panel_settings,
                         color: Colors.white,
-                        textColor: isComplete ? const Color(0xFF2C8D7C) : Colors.black87),
-                    _chip('Role: Admin', color: Colors.white, textColor: Colors.black87),
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Welcome, $_adminName',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _isSuperAdmin
+                                ? 'Super Admin - Full System Access'
+                                : 'System Overview & Management',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withOpacity(0.9),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              _isSuperAdmin ? 'Super Admin Access' : 'Admin Access',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-              if (loading)
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onProfileTap,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white70),
-                  ),
-                  icon: const Icon(Icons.account_circle),
-                  label: const Text('My Profile'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              if (!isComplete)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onCompleteTap,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF2C8D7C),
-                      elevation: 0,
+
+              const SizedBox(height: 32),
+
+              // Quick Stats Row
+              Row(
+                children: [
+                  const Text(
+                    'Management Tools',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
                     ),
-                    icon: const Icon(Icons.edit_rounded),
-                    label: const Text('Complete Profile'),
                   ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+                  const Spacer(),
+                  Text(
+                    '$totalModules Modules',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
 
-  Widget _chip(String label, {Color color = Colors.white, Color textColor = Colors.black87}) {
-    return Chip(
-      label: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
-      ),
-      backgroundColor: color,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-  }
-}
+              const SizedBox(height: 20),
 
-class _StatsRow extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    // lightweight live counters (donors & recipients)
-    return Row(
-      children: const [
-        Expanded(child: _CounterCard(title: 'Users', role: null)),
-        SizedBox(width: 10),
-        Expanded(child: _CounterCard(title: 'Donors', role: 'donor')),
-        SizedBox(width: 10),
-        Expanded(child: _CounterCard(title: 'Recipients', role: 'recipient')),
-      ],
-    );
-  }
-}
+              // Dashboard Grid - Removed Blood Requests, Hospitals, Blood Banks
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.85,
+                children: [
+                  _buildDashboardItem(
+                    context,
+                    'Analytics & Reports',
+                    'View system statistics and reports',
+                    Icons.analytics,
+                    const Color(0xFF667eea),
+                        () {
+                      Navigator.pushNamed(context, '/admin_reports');
+                    },
+                  ),
+                  _buildDashboardItem(
+                    context,
+                    'Verify Institutions',
+                    'Approve hospitals & blood banks',
+                    Icons.verified_user,
+                    const Color(0xFF4CAF50),
+                        () {
+                      Navigator.pushNamed(context, '/admin_verify_users');
+                    },
+                  ),
+                  _buildDashboardItem(
+                    context,
+                    'Manage Users',
+                    'View and manage all users',
+                    Icons.people_alt,
+                    const Color(0xFFFF9800),
+                        () {
+                      Navigator.pushNamed(context, '/admin_manage_users');
+                    },
+                  ),
+                  // Super Admin Only - Manage Admins
+                  if (_isSuperAdmin)
+                    _buildDashboardItem(
+                      context,
+                      'Manage Admins',
+                      'Add or remove administrators',
+                      Icons.admin_panel_settings,
+                      const Color(0xFF9C27B0),
+                          () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => AdminManageAdminsScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
 
-class _CounterCard extends StatelessWidget {
-  final String title;
-  final String? role; // null => all users
+              const SizedBox(height: 30),
 
-  const _CounterCard({required this.title, this.role});
-
-  @override
-  Widget build(BuildContext context) {
-    Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collection('users');
-    if (role != null) q = q.where('role', isEqualTo: role);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: q.snapshots(),
-        builder: (context, snap) {
-          final count = snap.hasData ? snap.data!.docs.length : 0;
-          return Row(
-            children: [
+              // System Status Section
               Container(
-                width: 42,
-                height: 42,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [Color(0xFFE3F7F2), Color(0xFFD2F1F3)],
-                  ),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.insights, color: Color(0xFF2C8D7C)),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '$title\n$count',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.blueGrey[900],
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Live System Status',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        _buildStatusIndicator('Active Users', _totalUsers, Colors.green),
+                        _buildStatusIndicator('Pending Verifications', _pendingVerifications, Colors.orange),
+                        _buildStatusIndicator('Active Requests', _totalRequests, Colors.blue),
+                        _buildStatusIndicator('Active Donors', _activeDonors, Colors.pink),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
-          );
-        },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showComingSoon(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.build, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Coming Soon'),
+          ],
+        ),
+        content: const Text('This feature is under development and will be available in the next update.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

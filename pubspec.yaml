@@ -33,6 +33,7 @@ dependencies:
   onesignal_flutter: ^5.2.0
   provider: ^6.1.1
   permission_handler: ^11.0.1
+  syncfusion_flutter_charts: ^30.2.7
 
   # ---- UI ----
   cupertino_icons: ^1.0.8
@@ -47,7 +48,7 @@ flutter:
   assets:
     - lib/assets/images/logo.png
     - lib/assets/images/google_logo.png
-    - lib/assets/lifedrop-5f112-firebase-adminsdk-fbsvc-af12b6f5a5.json
+#    - lib/assets/lifedrop-5f112-firebase-adminsdk-fbsvc-af12b6f5a5.json
   uses-material-design: true
 
 flutter_icons:

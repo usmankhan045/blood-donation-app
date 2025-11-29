@@ -11,7 +11,12 @@ import 'package:blood_donation_app/screens/auth/recipient/recipient_signup_scree
 import 'package:blood_donation_app/screens/common/select_user_type_screen.dart';
 import 'package:blood_donation_app/screens/common/splash_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/admin/admin_dashboard_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/admin/admin_manage_admins_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/admin/admin_profile_completion.dart';
+import 'package:blood_donation_app/screens/dashboard/admin/admin_profile_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/admin/admin_reports_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/admin/admin_verify_users_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/admin/admin_manage_users_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_profile_completion_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_dashboard_screen.dart';
@@ -139,6 +144,13 @@ class BloodDonationApp extends StatelessWidget {
           // NEW SCREENS - Add these routes
           '/my_requests': (context) => const MyRequestsScreen(),
           '/donor_requests': (context) => const DonorRequestsScreen(),
+
+          // NEW ADMIN ROUTES - Add these routes
+          '/admin_reports': (context) => const AdminReportsScreen(),
+          '/admin_verify_users': (context) => const AdminVerifyUsersScreen(),
+          '/admin_manage_users': (context) => const AdminManageUsersScreen(),
+          '/admin_profile': (context) => const AdminProfileScreen(),
+          '/admin_manage_admins': (context) => AdminManageAdminsScreen(),
 
           // Additional notification routes
           '/completed_requests': (context) => const MyRequestsScreen(),
