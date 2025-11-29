@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 
 class BloodBankProfileCompletionScreen extends StatefulWidget {
   @override
@@ -9,8 +11,11 @@ class BloodBankProfileCompletionScreen extends StatefulWidget {
 
 class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompletionScreen> {
   final _formKey = GlobalKey<FormState>();
-  bool _isLoading = false;
+  bool _isLoading = true;
+  bool _isSaving = false;
+  bool _isGettingLocation = false;
 
+  // Text Editing Controllers
   final TextEditingController bankNameCtrl = TextEditingController();
   final TextEditingController regNoCtrl = TextEditingController();
   final TextEditingController contactPersonCtrl = TextEditingController();
@@ -21,6 +26,12 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
   final TextEditingController hoursCtrl = TextEditingController();
   final TextEditingController emailCtrl = TextEditingController();
   final TextEditingController emergencyPhoneCtrl = TextEditingController();
+
+  // Location variables
+  double? _selectedLatitude;
+  double? _selectedLongitude;
+  String _locationAddress = 'No location selected';
+  Position? _currentPosition;
 
   List<String> bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
   List<String> selectedBloodTypes = [];
@@ -36,8 +47,162 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
     'Other'
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingProfile();
+    _checkLocationPermission();
+  }
+
+  // Check location permission
+  Future<void> _checkLocationPermission() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Location permission is required for profile completion')),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error checking location permission: $e');
+    }
+  }
+
+  // Get current location
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isGettingLocation = true);
+
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Please enable location services')),
+        );
+        return;
+      }
+
+      // Check permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Location permission is required')),
+          );
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Location permissions are permanently denied. Please enable them in app settings.')),
+        );
+        return;
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      // Get address from coordinates
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (placemarks.isNotEmpty) {
+        Placemark placemark = placemarks.first;
+        String address = [
+          placemark.street,
+          placemark.locality,
+          placemark.administrativeArea,
+          placemark.country
+        ].where((part) => part != null && part.isNotEmpty).join(', ');
+
+        setState(() {
+          _currentPosition = position;
+          _selectedLatitude = position.latitude;
+          _selectedLongitude = position.longitude;
+          _locationAddress = address.isNotEmpty ? address : 'Location selected (address not available)';
+        });
+
+        // Auto-fill city if empty
+        if (cityCtrl.text.isEmpty && placemark.locality != null) {
+          cityCtrl.text = placemark.locality!;
+        }
+
+        // Auto-fill address if empty
+        if (addressCtrl.text.isEmpty && address.isNotEmpty) {
+          addressCtrl.text = address;
+        }
+      }
+    } catch (e) {
+      print('Error getting location: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isGettingLocation = false);
+    }
+  }
+
+  // Load existing profile data
+  Future<void> _loadExistingProfile() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data();
+        if (data != null) {
+          setState(() {
+            bankNameCtrl.text = data['bloodBankName'] ?? '';
+            regNoCtrl.text = data['registrationNo'] ?? '';
+            contactPersonCtrl.text = data['contactPerson'] ?? '';
+            designationCtrl.text = data['designation'] ?? '';
+            phoneCtrl.text = data['phoneNumber'] ?? '';
+            emailCtrl.text = data['email'] ?? '';
+            addressCtrl.text = data['address'] ?? '';
+            cityCtrl.text = data['city'] ?? '';
+            hoursCtrl.text = data['operatingHours'] ?? '';
+            emergencyPhoneCtrl.text = data['emergencyPhone'] ?? '';
+            bloodBankType = data['bloodBankType'];
+            available24Hours = data['available24Hours'] ?? false;
+            acceptsDonations = data['acceptsDonations'] ?? true;
+            selectedBloodTypes = List<String>.from(data['availableBloodTypes'] ?? []);
+
+            // Load location data
+            _selectedLatitude = data['latitude'];
+            _selectedLongitude = data['longitude'];
+            _locationAddress = data['locationAddress'] ?? 'No location selected';
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading profile: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // 🔥 FIXED: Calculate completion score - checkboxes are now optional
   double get completionScore {
     int filled = 0;
+
+    // Mandatory fields (12 fields)
     if (bankNameCtrl.text.isNotEmpty) filled++;
     if (regNoCtrl.text.isNotEmpty) filled++;
     if (contactPersonCtrl.text.isNotEmpty) filled++;
@@ -50,11 +215,15 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
     if (bloodBankType != null) filled++;
     if (selectedBloodTypes.isNotEmpty) filled++;
     if (emergencyPhoneCtrl.text.isNotEmpty) filled++;
-    // available24Hours and acceptsDonations are always present (checkboxes)
-    return (filled + 2) / 14;
+    if (_selectedLatitude != null && _selectedLongitude != null) filled++; // Location field
+
+    // Checkboxes are optional, so we don't count them in the total
+    int totalMandatoryFields = 13; // 12 text fields + 1 location field
+
+    return filled / totalMandatoryFields;
   }
 
-  // Validation functions
+  // Validation functions (unchanged)
   String? _validateBankName(String? value) {
     if (value == null || value.isEmpty) {
       return 'Please enter blood bank name';
@@ -158,6 +327,14 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
     return null;
   }
 
+  // Validate location
+  String? _validateLocation() {
+    if (_selectedLatitude == null || _selectedLongitude == null) {
+      return 'Please select your location using the location button';
+    }
+    return null;
+  }
+
   Future<void> saveProfile() async {
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -171,7 +348,14 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
       return;
     }
 
-    setState(() => _isLoading = true);
+    // Validate location
+    if (_validateLocation() != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_validateLocation()!)));
+      return;
+    }
+
+    setState(() => _isSaving = true);
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -205,24 +389,28 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
         'available24Hours': available24Hours,
         'acceptsDonations': acceptsDonations,
         'inventory': inventory,
+
+        // Location data
+        'latitude': _selectedLatitude,
+        'longitude': _selectedLongitude,
+        'locationAddress': _locationAddress,
+        'geopoint': _selectedLatitude != null && _selectedLongitude != null
+            ? GeoPoint(_selectedLatitude!, _selectedLongitude!)
+            : null,
+
         'profileCompleted': completionScore == 1.0,
         'userType': 'blood_bank',
-        'isVerified': false, // Admin will verify later
+        'isVerified': false,
         'totalRequests': 0,
         'activeRequests': 0,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      print("Saving blood bank profile for UID: ${user.uid}");
-      print("Blood bank data: $data");
-
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .set(data, SetOptions(merge: true));
-
-      print("Blood bank profile successfully saved!");
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -233,13 +421,11 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
         ),
       );
 
-      // Navigate back only if profile is 100% complete
       if (completionScore == 1.0) {
         Navigator.pop(context, true);
       }
 
     } catch (e) {
-      print("Error saving blood bank profile: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Error saving profile: ${e.toString()}"),
@@ -247,7 +433,7 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
         ),
       );
     } finally {
-      setState(() => _isLoading = false);
+      setState(() => _isSaving = false);
     }
   }
 
@@ -319,7 +505,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 16),
 
-                      // Blood Bank Name
                       TextFormField(
                         controller: bankNameCtrl,
                         decoration: InputDecoration(
@@ -333,7 +518,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Blood Bank Type
                       DropdownButtonFormField<String>(
                         value: bloodBankType,
                         decoration: InputDecoration(
@@ -351,7 +535,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Registration Number
                       TextFormField(
                         controller: regNoCtrl,
                         decoration: InputDecoration(
@@ -366,7 +549,90 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Address
+                      // Location Picker Section
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Blood Bank Location *',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 16,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Card(
+                            elevation: 1,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(13),
+                              side: BorderSide(
+                                color: _selectedLatitude == null ? Colors.red : Colors.grey[300]!,
+                                width: 1,
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.location_on,
+                                        color: _selectedLatitude != null ? Colors.green : Colors.grey,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _locationAddress,
+                                          style: TextStyle(
+                                            color: _selectedLatitude != null ? Colors.black87 : Colors.grey,
+                                            fontSize: 14,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(height: 12),
+                                  ElevatedButton.icon(
+                                    icon: _isGettingLocation
+                                        ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : Icon(Icons.my_location, size: 18),
+                                    label: Text(_selectedLatitude != null ? 'Update Location' : 'Get Current Location'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: _selectedLatitude != null ? Colors.orange : Color(0xFF67D5B5),
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    ),
+                                    onPressed: _isGettingLocation ? null : _getCurrentLocation,
+                                  ),
+                                  if (_selectedLatitude != null) ...[
+                                    SizedBox(height: 8),
+                                    Text(
+                                      'Coordinates: ${_selectedLatitude!.toStringAsFixed(6)}, ${_selectedLongitude!.toStringAsFixed(6)}',
+                                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_validateLocation() != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, left: 8),
+                              child: Text(
+                                _validateLocation()!,
+                                style: TextStyle(color: Colors.red, fontSize: 12),
+                              ),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: 14),
+
                       TextFormField(
                         controller: addressCtrl,
                         decoration: InputDecoration(
@@ -375,13 +641,13 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                           prefixIcon: Icon(Icons.location_on),
                           filled: true,
                           fillColor: Colors.white,
+                          hintText: 'Full address will be auto-filled when you select location',
                         ),
                         maxLines: 2,
                         validator: _validateAddress,
                       ),
                       SizedBox(height: 14),
 
-                      // City
                       TextFormField(
                         controller: cityCtrl,
                         decoration: InputDecoration(
@@ -390,6 +656,7 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                           prefixIcon: Icon(Icons.location_city),
                           filled: true,
                           fillColor: Colors.white,
+                          hintText: 'City will be auto-filled when you select location',
                         ),
                         validator: _validateCity,
                       ),
@@ -399,7 +666,7 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
               ),
               SizedBox(height: 16),
 
-              // Contact Information Section
+              // Contact Information
               Card(
                 elevation: 2,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
@@ -414,7 +681,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 16),
 
-                      // Contact Person
                       TextFormField(
                         controller: contactPersonCtrl,
                         decoration: InputDecoration(
@@ -428,7 +694,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Designation
                       TextFormField(
                         controller: designationCtrl,
                         decoration: InputDecoration(
@@ -443,7 +708,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Phone Number
                       TextFormField(
                         controller: phoneCtrl,
                         decoration: InputDecoration(
@@ -459,7 +723,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Emergency Phone
                       TextFormField(
                         controller: emergencyPhoneCtrl,
                         decoration: InputDecoration(
@@ -475,7 +738,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // Email
                       TextFormField(
                         controller: emailCtrl,
                         decoration: InputDecoration(
@@ -494,7 +756,7 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
               ),
               SizedBox(height: 16),
 
-              // Blood Bank Operations Section
+              // Operations
               Card(
                 elevation: 2,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
@@ -509,7 +771,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 16),
 
-                      // Operating Hours
                       TextFormField(
                         controller: hoursCtrl,
                         decoration: InputDecoration(
@@ -524,7 +785,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 14),
 
-                      // 24/7 Availability
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         value: available24Hours,
@@ -536,7 +796,6 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
                       ),
                       SizedBox(height: 8),
 
-                      // Accepts Donations
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         value: acceptsDonations,
@@ -552,7 +811,7 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
               ),
               SizedBox(height: 16),
 
-              // Available Blood Types Section
+              // Blood Types
               Card(
                 elevation: 2,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
@@ -621,27 +880,43 @@ class _BloodBankProfileCompletionScreenState extends State<BloodBankProfileCompl
 
               // Save Button
               ElevatedButton.icon(
-                icon: _isLoading
+                icon: _isSaving
                     ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Icon(Icons.save_alt),
+                    : Icon(Icons.save_alt, color: Colors.white),
                 label: Text(
                   completionScore == 1.0 ? "Complete Profile" : "Save Progress",
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: completionScore == 1.0 ? Colors.green : Color(0xFF67D5B5),
+                  foregroundColor: Colors.white,
                   padding: EdgeInsets.symmetric(vertical: 15),
                   textStyle: TextStyle(fontSize: 17),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(13),
                   ),
                 ),
-                onPressed: _isLoading ? null : saveProfile,
+                onPressed: _isSaving ? null : saveProfile,
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    bankNameCtrl.dispose();
+    regNoCtrl.dispose();
+    contactPersonCtrl.dispose();
+    designationCtrl.dispose();
+    phoneCtrl.dispose();
+    addressCtrl.dispose();
+    cityCtrl.dispose();
+    hoursCtrl.dispose();
+    emailCtrl.dispose();
+    emergencyPhoneCtrl.dispose();
+    super.dispose();
   }
 }

@@ -1,3 +1,4 @@
+import 'package:blood_donation_app/providers/blood_bank_provider.dart';
 import 'package:blood_donation_app/screens/auth/admin/admin_login_screen.dart';
 import 'package:blood_donation_app/screens/auth/admin/admin_signup_screen.dart';
 import 'package:blood_donation_app/screens/auth/blood_bank/blood_bank_login_screen.dart';
@@ -19,6 +20,7 @@ import 'package:blood_donation_app/screens/dashboard/admin/admin_verify_users_sc
 import 'package:blood_donation_app/screens/dashboard/admin/admin_manage_users_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_profile_completion_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/blood_bank/stock_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_profile_completion.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_profile_screen.dart';
@@ -84,6 +86,8 @@ class BloodDonationApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => RequestProvider()),
+        ChangeNotifierProvider(create: (_) => BloodBankProvider()),
+
         // Add other providers here as needed
       ],
       child: MaterialApp(
@@ -155,6 +159,9 @@ class BloodDonationApp extends StatelessWidget {
           // Additional notification routes
           '/completed_requests': (context) => const MyRequestsScreen(),
           '/blood_bank_requests': (context) => const BloodBankDashboardScreen(),
+
+        //   blood bank
+          '/blood_bank_inventory': (context) => const StockScreen(),
         },
       ),
     );
