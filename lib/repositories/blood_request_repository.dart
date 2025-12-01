@@ -290,12 +290,12 @@ class BloodRequestRepository {
   // Find eligible blood banks within the search radius
   Future<void> _findEligibleBloodBanks(BloodRequest request) async {
     try {
-      // Get blood banks with the required blood type in inventory
+      // 🔧 FIXED: Query blood banks with completed profiles (removed isActive filter for broader matching)
+      // We'll check isActive/isVerified after fetching to allow either field
       final bloodBanksSnapshot = await _fs
           .collection('users')
           .where('role', isEqualTo: 'blood_bank')
           .where('profileCompleted', isEqualTo: true)
-          .where('isActive', isEqualTo: true)
           .get();
 
       if (bloodBanksSnapshot.docs.isEmpty) {
@@ -303,7 +303,7 @@ class BloodRequestRepository {
         return;
       }
 
-      print('Found ${bloodBanksSnapshot.docs.length} blood banks');
+      print('Found ${bloodBanksSnapshot.docs.length} blood banks with completed profiles');
 
       final eligibleBloodBanks = <String>[];
       final bloodBankDistances = <String, double>{};
@@ -312,6 +312,15 @@ class BloodRequestRepository {
       for (final bloodBankDoc in bloodBanksSnapshot.docs) {
         final bloodBankData = bloodBankDoc.data() as Map<String, dynamic>;
         final bloodBankId = bloodBankDoc.id;
+
+        // 🔧 FIXED: Check for either isActive OR isVerified (supports both field names)
+        final isActive = bloodBankData['isActive'] as bool? ?? false;
+        final isVerified = bloodBankData['isVerified'] as bool? ?? false;
+        
+        if (!isActive && !isVerified) {
+          print('❌ Blood bank ${bloodBankData['bloodBankName'] ?? bloodBankId} is not active/verified');
+          continue;
+        }
 
         if (bloodBankData['location'] is GeoPoint) {
           final bloodBankLocation = bloodBankData['location'] as GeoPoint;

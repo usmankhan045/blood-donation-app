@@ -1,0 +1,126 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 👤 USERS COLLECTION
+    // ═══════════════════════════════════════════════════════════════
+    match /users/{userId} {
+      // Users can read/write their own document
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow reading other users for matching (but not sensitive fields)
+      allow read: if request.auth != null;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🩸 BLOOD REQUESTS COLLECTION
+    // ═══════════════════════════════════════════════════════════════
+    match /blood_requests/{requestId} {
+      // Anyone authenticated can read
+      allow read: if request.auth != null;
+      
+      // Anyone authenticated can create
+      allow create: if request.auth != null;
+      
+      // Only requester or acceptor can update/delete
+      allow update, delete: if request.auth != null && (
+        request.auth.uid == resource.data.requesterId ||
+        request.auth.uid == resource.data.acceptedBy
+      );
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🔔 USER NOTIFICATIONS (IN-APP INBOX)
+    // ═══════════════════════════════════════════════════════════════
+    match /user_notifications/{userId} {
+      // Users can read their own notification settings
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Inbox subcollection
+      match /inbox/{notificationId} {
+        // Users can read their own notifications
+        allow read: if request.auth != null && request.auth.uid == userId;
+        
+        // Any authenticated user can create notifications for others (for blood requests)
+        allow create: if request.auth != null;
+        
+        // Users can update their own notifications (mark as read)
+        allow update: if request.auth != null && request.auth.uid == userId;
+        
+        // Users can delete their own notifications
+        allow delete: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🔔 PENDING NOTIFICATIONS (RETRY QUEUE)
+    // ═══════════════════════════════════════════════════════════════
+    match /pending_notifications/{notificationId} {
+      // Any authenticated user can create notifications
+      allow create: if request.auth != null;
+      
+      // Users can read their own notifications (by token)
+      allow read: if request.auth != null;
+      
+      // Users can update their notifications (mark as delivered)
+      allow update: if request.auth != null;
+      
+      // Auto-delete after 24 hours (handled by app cleanup)
+      allow delete: if request.auth != null;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 💬 CHAT MESSAGES
+    // ═══════════════════════════════════════════════════════════════
+    match /chats/{chatId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /chat_messages/{messageId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🏥 BLOOD BANKS
+    // ═══════════════════════════════════════════════════════════════
+    match /blood_banks/{bloodBankId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == bloodBankId;
+      
+      // Inventory subcollection
+      match /inventory/{bloodType} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == bloodBankId;
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🩺 DONORS
+    // ═══════════════════════════════════════════════════════════════
+    match /donors/{donorId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == donorId;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 🏥 HOSPITALS
+    // ═══════════════════════════════════════════════════════════════
+    match /hospitals/{hospitalId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == hospitalId;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 📊 REVIEWS
+    // ═══════════════════════════════════════════════════════════════
+    match /reviews/{reviewId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && 
+        request.auth.uid == resource.data.reviewerId;
+    }
+  }
+}
+

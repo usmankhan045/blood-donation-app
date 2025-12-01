@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/theme.dart';
+import '../../../widgets/custom_snackbar.dart';
 
 class StockScreen extends StatefulWidget {
   const StockScreen({Key? key}) : super(key: key);
@@ -65,16 +67,21 @@ class _StockScreenState extends State<StockScreen> {
         inventory[bloodType]['units'] = newUnits;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$bloodType updated successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        AppSnackbar.showSuccess(
+          context,
+          '$bloodType Updated',
+          subtitle: 'Inventory updated to $newUnits units',
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        AppSnackbar.showError(
+          context,
+          'Update Failed',
+          subtitle: e.toString(),
+        );
+      }
     }
   }
 
@@ -84,12 +91,24 @@ class _StockScreenState extends State<StockScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
         title: Row(
           children: [
-            Icon(Icons.edit, color: Color(0xFF67D5B5)),
-            SizedBox(width: 12),
-            Text('Update $bloodType Units'),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.edit, color: BloodAppTheme.primary, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Update $bloodType Units',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Column(
@@ -111,25 +130,35 @@ class _StockScreenState extends State<StockScreen> {
             onPressed: () => Navigator.pop(context),
             child: Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFF67D5B5),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: BloodAppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              onPressed: () {
+                int? newUnits = int.tryParse(controller.text);
+                if (newUnits != null && newUnits >= 0) {
+                  updateUnits(bloodType, newUnits);
+                  Navigator.pop(context);
+                } else {
+                  if (mounted) {
+                    AppSnackbar.showError(
+                      context,
+                      'Invalid Input',
+                      subtitle: 'Please enter a valid number',
+                    );
+                  }
+                }
+              },
+              child: const Text(
+                'Update',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
             ),
-            onPressed: () {
-              int? newUnits = int.tryParse(controller.text);
-              if (newUnits != null && newUnits >= 0) {
-                updateUnits(bloodType, newUnits);
-                Navigator.pop(context);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Please enter a valid number')),
-                );
-              }
-            },
-            child: Text('Update', style: TextStyle(color: Colors.white)),
-          ),
         ],
       ),
     );
@@ -139,12 +168,24 @@ class _StockScreenState extends State<StockScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
         title: Row(
           children: [
-            Icon(Icons.tune, color: Color(0xFF67D5B5)),
-            SizedBox(width: 12),
-            Text('Quick Adjust $bloodType'),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.tune, color: BloodAppTheme.primary, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Quick Adjust $bloodType',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Column(
@@ -236,18 +277,26 @@ class _StockScreenState extends State<StockScreen> {
   }) {
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
-        backgroundColor: color ?? Color(0xFF67D5B5),
+        backgroundColor: color ?? BloodAppTheme.primary,
         foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        elevation: 2,
       ),
       onPressed: onPressed,
-      child: Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
     );
   }
 
   void showAddBloodTypeDialog() {
-    final TextEditingController bloodTypeCtrl = TextEditingController();
     final TextEditingController unitsCtrl = TextEditingController(text: '0');
 
     final List<String> allBloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -256,9 +305,13 @@ class _StockScreenState extends State<StockScreen> {
         .toList();
 
     if (remainingTypes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('All blood types are already added')),
-      );
+      if (mounted) {
+        AppSnackbar.showInfo(
+          context,
+          'All Types Added',
+          subtitle: 'All blood types are already in your inventory',
+        );
+      }
       return;
     }
 
@@ -268,14 +321,26 @@ class _StockScreenState extends State<StockScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(Icons.add_circle, color: Color(0xFF67D5B5)),
-              SizedBox(width: 12),
-              Text('Add Blood Type'),
-            ],
-          ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.add_circle, color: BloodAppTheme.primary, size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Add Blood Type',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -310,9 +375,12 @@ class _StockScreenState extends State<StockScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Color(0xFF67D5B5),
+                backgroundColor: BloodAppTheme.primary,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
               onPressed: () async {
                 int? units = int.tryParse(unitsCtrl.text);
@@ -336,20 +404,28 @@ class _StockScreenState extends State<StockScreen> {
                     Navigator.pop(context);
                     loadInventory();
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('$selectedType added successfully'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
+                    if (mounted) {
+                      AppSnackbar.showSuccess(
+                        context,
+                        '$selectedType Added',
+                        subtitle: 'Blood type added to inventory',
+                      );
+                    }
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                    );
+                    if (mounted) {
+                      AppSnackbar.showError(
+                        context,
+                        'Add Failed',
+                        subtitle: e.toString(),
+                      );
+                    }
                   }
                 }
               },
-              child: Text('Add', style: TextStyle(color: Colors.white)),
+              child: const Text(
+                'Add',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -367,215 +443,415 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Color getStatusColor(int units) {
-    if (units == 0) return Colors.grey;
-    if (units < 5) return Colors.orange;
-    return Colors.green;
+    if (units == 0) return BloodAppTheme.error;
+    if (units < 5) return BloodAppTheme.warning;
+    return BloodAppTheme.success;
   }
 
   String getStatusText(int units) {
     if (units == 0) return 'Out of Stock';
     if (units < 5) return 'Low Stock';
-    return 'Available';
+    return 'In Stock';
+  }
+
+  int get totalUnits {
+    int total = 0;
+    inventory.forEach((key, value) {
+      if (value is Map && value['units'] != null) {
+        total += (value['units'] as num).toInt();
+      }
+    });
+    return total;
   }
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return Scaffold(
-        backgroundColor: Color(0xFFF6F9FB),
+        backgroundColor: BloodAppTheme.background,
         appBar: AppBar(
-          title: Text('Inventory Management'),
-          backgroundColor: Color(0xFF67D5B5),
+          title: const Text(
+            'Inventory Management',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: BloodAppTheme.primary,
+          foregroundColor: Colors.white,
         ),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF67D5B5))),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: const AlwaysStoppedAnimation<Color>(BloodAppTheme.primary),
+          ),
+        ),
       );
     }
 
     return Scaffold(
-      backgroundColor: Color(0xFFF6F9FB),
+      backgroundColor: BloodAppTheme.background,
       appBar: AppBar(
-        title: Text('Inventory Management'),
-        backgroundColor: Color(0xFF67D5B5),
+        title: const Text(
+          'Inventory Management',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: BloodAppTheme.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
         actions: [
           IconButton(
-            icon: Icon(Icons.add),
+            icon: const Icon(Icons.add),
             onPressed: showAddBloodTypeDialog,
             tooltip: 'Add Blood Type',
           ),
           IconButton(
-            icon: Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh),
             onPressed: loadInventory,
+            tooltip: 'Refresh',
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.only(bottom: 50),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Search Bar
-              Container(
-                color: Color(0xFF67D5B5),
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Summary Card
+            Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [BloodAppTheme.primary, BloodAppTheme.primaryDark],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: BloodAppTheme.cardShadow,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.inventory_2,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Total Inventory',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          '$totalUnits Units',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${inventory.length} Blood Type${inventory.length != 1 ? 's' : ''}',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Search Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: BloodAppTheme.cardShadow,
+                ),
                 child: TextField(
                   onChanged: (value) => setState(() => searchQuery = value),
                   decoration: InputDecoration(
                     hintText: 'Search blood type...',
-                    prefixIcon: Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search, color: BloodAppTheme.textHint),
                     filled: true,
                     fillColor: Colors.white,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
                     ),
                   ),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
 
-              // Inventory List
-              Expanded(
-                child: inventory.isEmpty
-                    ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text(
-                        'No inventory data',
-                        style: TextStyle(fontSize: 18, color: Colors.grey),
-                      ),
-                      SizedBox(height: 8),
-                      ElevatedButton.icon(
-                        icon: Icon(Icons.add, color: Colors.white),
-                        label: Text('Add Blood Type', style: TextStyle(color: Colors.white)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(0xFF67D5B5),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: showAddBloodTypeDialog,
-                      ),
-                    ],
-                  ),
-                )
-                    : filteredInventory.isEmpty
-                    ? Center(
-                  child: Text(
-                    'No matching blood types',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                )
-                    : RefreshIndicator(
-                  onRefresh: loadInventory,
-                  color: Color(0xFF67D5B5),
-                  child: ListView.builder(
-                    padding: EdgeInsets.all(16),
-                    itemCount: filteredInventory.length,
-                    itemBuilder: (context, index) {
-                      final entry = filteredInventory[index];
-                      final bloodType = entry.key;
-                      final data = entry.value as Map;
-                      final units = data['units'] ?? 0;
-
-                      return Card(
-                        elevation: 2,
-                        margin: EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.all(16),
-                          leading: Container(
-                            width: 60,
-                            height: 60,
+            // Inventory List
+            Expanded(
+              child: inventory.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Color(0xFF67D5B5).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
+                              color: BloodAppTheme.primary.withOpacity(0.1),
+                              shape: BoxShape.circle,
                             ),
-                            child: Center(
-                              child: Text(
-                                bloodType,
+                            child: Icon(
+                              Icons.inventory_2_outlined,
+                              size: 64,
+                              color: BloodAppTheme.primary.withOpacity(0.5),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'No Inventory Data',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: BloodAppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Add blood types to start managing your inventory',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: BloodAppTheme.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.add, color: Colors.white),
+                            label: const Text(
+                              'Add Blood Type',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: BloodAppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: showAddBloodTypeDialog,
+                          ),
+                        ],
+                      ),
+                    )
+                  : filteredInventory.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.search_off,
+                                size: 64,
+                                color: BloodAppTheme.textHint,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No matching blood types',
                                 style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF67D5B5),
+                                  fontSize: 16,
+                                  color: BloodAppTheme.textSecondary,
                                 ),
                               ),
-                            ),
+                            ],
                           ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '$units Units',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  overflow: TextOverflow.ellipsis, // Prevent overflow
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Container(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: loadInventory,
+                          color: BloodAppTheme.primary,
+                          child: ListView.builder(
+                            physics: const BouncingScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: filteredInventory.length,
+                            itemBuilder: (context, index) {
+                              final entry = filteredInventory[index];
+                              final bloodType = entry.key;
+                              final data = entry.value as Map;
+                              final units = data['units'] ?? 0;
+                              final statusColor = getStatusColor(units);
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 12),
                                 decoration: BoxDecoration(
-                                  color: getStatusColor(units).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: getStatusColor(units),
-                                    width: 1,
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: BloodAppTheme.cardShadow,
+                                ),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(18),
+                                    onTap: () => showEditDialog(bloodType, units),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Row(
+                                        children: [
+                                          // Blood Type Badge
+                                          Container(
+                                            width: 70,
+                                            height: 70,
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [
+                                                  BloodAppTheme.primary,
+                                                  BloodAppTheme.primaryDark,
+                                                ],
+                                              ),
+                                              borderRadius: BorderRadius.circular(16),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: BloodAppTheme.primary.withOpacity(0.3),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 4),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                bloodType,
+                                                style: const TextStyle(
+                                                  fontSize: 22,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          // Details
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Text(
+                                                      '$units',
+                                                      style: const TextStyle(
+                                                        fontSize: 28,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: BloodAppTheme.textPrimary,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    const Text(
+                                                      'Units',
+                                                      style: TextStyle(
+                                                        fontSize: 14,
+                                                        color: BloodAppTheme.textSecondary,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 4,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: statusColor.withOpacity(0.1),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    border: Border.all(
+                                                      color: statusColor,
+                                                      width: 1.5,
+                                                    ),
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Container(
+                                                        width: 6,
+                                                        height: 6,
+                                                        decoration: BoxDecoration(
+                                                          color: statusColor,
+                                                          shape: BoxShape.circle,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Text(
+                                                        getStatusText(units),
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: statusColor,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          // Action Buttons
+                                          Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(Icons.tune),
+                                                color: BloodAppTheme.primary,
+                                                onPressed: () => showQuickAdjustDialog(bloodType, units),
+                                                tooltip: 'Quick Adjust',
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.edit),
+                                                color: BloodAppTheme.info,
+                                                onPressed: () => showEditDialog(bloodType, units),
+                                                tooltip: 'Edit',
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
-                                child: Text(
-                                  getStatusText(units),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: getStatusColor(units),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            'Last updated: ${data['lastUpdated'] != null ? 'Recently' : 'N/A'}',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.speed, color: Color(0xFF67D5B5)),
-                                onPressed: () => showQuickAdjustDialog(bloodType, units),
-                                tooltip: 'Quick Adjust',
-                              ),
-                              IconButton(
-                                icon: Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => showEditDialog(bloodType, units),
-                                tooltip: 'Edit',
-                              ),
-                            ],
+                              );
+                            },
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: showAddBloodTypeDialog,
-        backgroundColor: Color(0xFF67D5B5),
+        backgroundColor: BloodAppTheme.primary,
         foregroundColor: Colors.white,
-        icon: Icon(Icons.add, color: Colors.white),
-        label: Text('Add Blood Type', style: TextStyle(color: Colors.white)),
+        elevation: 4,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text(
+          'Add Blood Type',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
     );
   }

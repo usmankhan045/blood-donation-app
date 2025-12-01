@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme.dart';
+import '../../../widgets/custom_snackbar.dart';
+import '../../../services/auth_service.dart';
 
 class DonorProfileScreen extends StatefulWidget {
   const DonorProfileScreen({super.key});
@@ -13,7 +16,6 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
   final _auth = FirebaseAuth.instance;
   final _formKey = GlobalKey<FormState>();
 
-  // controllers
   final _nameCtr = TextEditingController();
   final _phoneCtr = TextEditingController();
   final _cityCtr = TextEditingController();
@@ -26,26 +28,11 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
   String? _bloodType;
   String? _gender;
   DateTime? _dob;
-
   bool _editing = false;
   bool _saving = false;
 
-  final Map<String, TextEditingController> _otherCtrs = {};
-
-  final List<String> _bloodTypes = const [
-    'A+','A-','B+','B-','AB+','AB-','O+','O-'
-  ];
-  final List<String> _genders = const [
-    'Male','Female','Other','Prefer not to say'
-  ];
-
-  static const Set<String> _knownKeys = {
-    'uid','email','role','fullName','name','phone','phoneNumber','city','address',
-    'bloodType','gender','dob','about','cnic',
-    'emergencyContactName','emergencyContactPhone',
-    'profileCompleted','verified','photoUrl','createdAt','updatedAt',
-    'isAvailable','location'
-  };
+  final List<String> _bloodTypes = const ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+  final List<String> _genders = const ['Male', 'Female', 'Other', 'Prefer not to say'];
 
   @override
   void dispose() {
@@ -57,7 +44,6 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
     _cnicCtr.dispose();
     _emgNameCtr.dispose();
     _emgPhoneCtr.dispose();
-    _otherCtrs.forEach((_, c) => c.dispose());
     super.dispose();
   }
 
@@ -70,273 +56,671 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
         body: const Center(child: Text('Not logged in')),
       );
     }
-    final email = _auth.currentUser?.email ?? '';
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Profile'),
-        actions: [
-          if (!_editing)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _editing = true),
-            ),
-          if (_editing)
-            TextButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                  height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Save'),
-            ),
-        ],
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
-      ),
+      backgroundColor: BloodAppTheme.background,
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(BloodAppTheme.primary),
+              ),
+            );
           }
           if (!snap.hasData || !snap.data!.exists) {
             return const Center(child: Text('Profile not found.'));
           }
 
           final data = (snap.data!.data() as Map<String, dynamic>?) ?? {};
-          _hydrate(data, editing: _editing);
+          _hydrate(data);
 
-          final role = (data['role'] ?? 'Donor').toString();
           final verified = (data['verified'] ?? false) as bool;
           final completed = (data['profileCompleted'] ?? false) as bool;
-          final createdAt = data['createdAt'];
-          final updatedAt = data['updatedAt'];
+          final isAvailable = (data['isAvailable'] ?? false) as bool;
+          final totalDonations = (data['totalDonations'] ?? 0) as int;
+          final createdAt = data['createdAt'] as Timestamp?;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(18),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  _Header(
-                    name: _nameCtr.text.isEmpty ? 'Your Name' : _nameCtr.text,
-                    email: email,
-                    role: role,
-                    verified: verified,
-                    completed: completed,
-                    photoUrl: (data['photoUrl'] ?? '') as String,
-                  ),
-                  const SizedBox(height: 18),
+          return CustomScrollView(
+            physics: const BouncingScrollPhysics(),
+            slivers: [
+              _buildAppBar(data, verified, completed),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        // Stats Cards
+                        _buildStatsRow(totalDonations, isAvailable, createdAt),
+                        const SizedBox(height: 20),
 
-                  _section('Personal', Column(
-                    children: [
-                      _tf('Full Name', _nameCtr, enabled: _editing,
-                          validator: (v)=> (v==null||v.trim().isEmpty)?'Required':null),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _gender,
-                              isExpanded: true,
-                              items: _genders.map((g)=>DropdownMenuItem(
-                                value: g, child: Text(g, maxLines: 1, overflow: TextOverflow.ellipsis),
-                              )).toList(),
-                              selectedItemBuilder: (_) => _genders.map((g)=>Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(g, maxLines:1, overflow: TextOverflow.ellipsis),
-                              )).toList(),
-                              onChanged: _editing ? (v)=>setState(()=>_gender=v) : null,
-                              decoration: const InputDecoration(
-                                labelText: 'Gender',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: InkWell(
-                              onTap: _editing ? _pickDob : null,
-                              child: InputDecorator(
-                                decoration: const InputDecoration(
-                                  labelText: 'Date of Birth',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                child: Text(
-                                  _dob==null ? 'Not set'
-                                      : '${_dob!.year}-${_dob!.month.toString().padLeft(2,'0')}-${_dob!.day.toString().padLeft(2,'0')}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                          ),
+                        // Profile Sections
+                        if (_editing) ...[
+                          _buildEditableSection(data),
+                        ] else ...[
+                          _buildViewSection(data, verified, completed),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: _bloodType,
-                        isExpanded: true,
-                        items: _bloodTypes.map((b)=>DropdownMenuItem(
-                          value: b, child: Text(b, maxLines:1, overflow: TextOverflow.ellipsis),
-                        )).toList(),
-                        selectedItemBuilder: (_)=>_bloodTypes.map((b)=>Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(b, maxLines:1, overflow: TextOverflow.ellipsis),
-                        )).toList(),
-                        onChanged: _editing ? (v)=>setState(()=>_bloodType=v) : null,
-                        decoration: const InputDecoration(
-                          labelText: 'Blood Type',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        validator: (_)=> (_bloodType==null||_bloodType!.isEmpty) ? 'Select blood type' : null,
-                      ),
-                      const SizedBox(height: 12),
-                      _tf('About (optional)', _aboutCtr, enabled: _editing, maxLines: 2),
-                    ],
-                  )),
 
-                  const SizedBox(height: 18),
+                        const SizedBox(height: 24),
 
-                  _section('Contact', Column(
-                    children: [
-                      _tf('Phone Number', _phoneCtr, enabled: _editing,
-                          keyboardType: TextInputType.phone,
-                          validator: (v)=> (v==null||v.trim().length<8)?'Enter a valid number':null),
-                      const SizedBox(height: 12),
-                      _tf('City', _cityCtr, enabled: _editing,
-                          validator: (v)=> (v==null||v.trim().isEmpty)?'Required':null),
-                      const SizedBox(height: 12),
-                      _tf('Address (optional)', _addressCtr, enabled: _editing, maxLines: 2),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(child: _tf('Emergency Contact Name (optional)', _emgNameCtr, enabled: _editing)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _tf('Emergency Contact Phone (optional)', _emgPhoneCtr, enabled: _editing, keyboardType: TextInputType.phone)),
+                        // Action Buttons
+                        if (_editing) ...[
+                          _buildSaveButton(),
+                          const SizedBox(height: 12),
+                          _buildCancelButton(),
+                        ] else ...[
+                          _buildEditButton(),
+                          const SizedBox(height: 16),
+                          _buildLogoutButton(),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      _tf('CNIC (optional)', _cnicCtr, enabled: _editing),
-                    ],
-                  )),
 
-                  const SizedBox(height: 18),
-
-                  _section('Account', Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _kv('Email', email),
-                      const SizedBox(height: 8),
-                      _kv('Role', role),
-                      const SizedBox(height: 8),
-                      _kv('Verified', verified ? 'Yes' : 'No'),
-                      const SizedBox(height: 8),
-                      if (createdAt is Timestamp) _kv('Created', createdAt.toDate().toString().split('.').first),
-                      if (updatedAt is Timestamp) _kv('Updated', updatedAt.toDate().toString().split('.').first),
-                    ],
-                  )),
-
-                  const SizedBox(height: 18),
-
-                  _section('Other Fields',
-                    _otherCtrs.isEmpty
-                        ? const Align(alignment: Alignment.centerLeft, child: Text('No additional fields.', style: TextStyle(color: Colors.black54)))
-                        : Column(
-                      children: _otherCtrs.entries.map((e){
-                        final key=e.key; final ctr=e.value;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 4,
-                                child: Text(key, maxLines:1, overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                flex: 6,
-                                child: TextFormField(
-                                  controller: ctr,
-                                  enabled: _editing,
-                                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                                ),
-                              ),
-                              if (_editing)
-                                SizedBox(
-                                  width: 40,
-                                  child: IconButton(
-                                    tooltip: 'Remove',
-                                    icon: const Icon(Icons.close),
-                                    onPressed: (){
-                                      setState(()=> _otherCtrs.remove(key)?.dispose());
-                                    },
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
+                        const SizedBox(height: 40),
+                      ],
                     ),
-                    trailing: _editing ? IconButton(
-                      tooltip: 'Add custom field',
-                      icon: const Icon(Icons.add),
-                      onPressed: _addCustomFieldDialog,
-                    ) : null,
                   ),
-
-                  const SizedBox(height: 24),
-
-                  if (_editing)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _saving ? null : _save,
-                        icon: const Icon(Icons.save),
-                        label: const Text('Update Profile'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF67D5B5),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                      ),
-                    ),
-                  if (_editing)
-                    TextButton(
-                      onPressed: _saving ? null : ()=> setState(()=> _editing=false),
-                      child: const Text('Cancel'),
-                    ),
-                ],
+                ),
               ),
-            ),
+            ],
           );
         },
       ),
     );
   }
 
-  void _hydrate(Map<String, dynamic> data, {required bool editing}) {
-    if (editing) return;
+  SliverAppBar _buildAppBar(Map<String, dynamic> data, bool verified, bool completed) {
+    final name = _nameCtr.text.isNotEmpty ? _nameCtr.text : 'Donor';
+    final email = _auth.currentUser?.email ?? '';
+    final photoUrl = (data['photoUrl'] ?? '') as String;
 
-    _nameCtr.text   = (data['fullName'] ?? data['name'] ?? '').toString();
-    _phoneCtr.text  = (data['phone'] ?? data['phoneNumber'] ?? '').toString();
-    _cityCtr.text   = (data['city'] ?? '').toString();
-    _addressCtr.text= (data['address'] ?? '').toString();
-    _aboutCtr.text  = (data['about'] ?? '').toString();
-    _cnicCtr.text   = (data['cnic'] ?? '').toString();
-    _emgNameCtr.text= (data['emergencyContactName'] ?? '').toString();
-    _emgPhoneCtr.text=(data['emergencyContactPhone'] ?? '').toString();
-    _bloodType      = (data['bloodType'] ?? _bloodType)?.toString();
-    _gender         = (data['gender'] ?? _gender)?.toString();
+    return SliverAppBar(
+      expandedHeight: 280,
+      floating: false,
+      pinned: true,
+      backgroundColor: BloodAppTheme.primary,
+      foregroundColor: Colors.white,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [BloodAppTheme.primary, BloodAppTheme.primaryDark],
+            ),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 40),
+                // Avatar
+                Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.2),
+                            blurRadius: 20,
+                          ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundColor: Colors.white,
+                        backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                        child: photoUrl.isEmpty
+                            ? Text(
+                                name.isNotEmpty ? name[0].toUpperCase() : 'D',
+                                style: const TextStyle(
+                                  color: BloodAppTheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 36,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
+                    if (verified)
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.verified,
+                            color: BloodAppTheme.success,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Name
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                // Email
+                Text(
+                  email,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Status Chips
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildChip(
+                      label: 'Donor',
+                      icon: Icons.volunteer_activism,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildChip(
+                      label: _bloodType ?? '?',
+                      icon: Icons.water_drop,
+                      color: Colors.white,
+                      isBloodType: true,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildChip(
+                      label: completed ? 'Complete' : 'Incomplete',
+                      icon: completed ? Icons.check_circle : Icons.pending,
+                      color: completed ? BloodAppTheme.success : BloodAppTheme.warning,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    required IconData icon,
+    required Color color,
+    bool isBloodType = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: isBloodType ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsRow(int totalDonations, bool isAvailable, Timestamp? createdAt) {
+    final memberSince = createdAt != null
+        ? '${createdAt.toDate().month}/${createdAt.toDate().year}'
+        : 'N/A';
+
+    return Row(
+      children: [
+        Expanded(child: _buildStatCard('Donations', '$totalDonations', Icons.favorite, BloodAppTheme.accent)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildStatCard(
+            'Status',
+            isAvailable ? 'Active' : 'Inactive',
+            isAvailable ? Icons.check_circle : Icons.pause_circle,
+            isAvailable ? BloodAppTheme.success : BloodAppTheme.warning,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: _buildStatCard('Member', memberSince, Icons.calendar_today, BloodAppTheme.info)),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: BloodAppTheme.cardShadow,
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: BloodAppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildViewSection(Map<String, dynamic> data, bool verified, bool completed) {
+    return Column(
+      children: [
+        _buildInfoCard(
+          title: 'Personal Information',
+          icon: Icons.person,
+          items: [
+            _InfoItem('Full Name', _nameCtr.text),
+            _InfoItem('Gender', _gender ?? 'Not set'),
+            _InfoItem('Date of Birth', _dob != null ? '${_dob!.day}/${_dob!.month}/${_dob!.year}' : 'Not set'),
+            _InfoItem('Blood Type', _bloodType ?? 'Not set', highlight: true),
+            if (_aboutCtr.text.isNotEmpty) _InfoItem('About', _aboutCtr.text),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildInfoCard(
+          title: 'Contact Information',
+          icon: Icons.contact_phone,
+          items: [
+            _InfoItem('Phone', _phoneCtr.text.isNotEmpty ? _phoneCtr.text : 'Not set'),
+            _InfoItem('City', _cityCtr.text.isNotEmpty ? _cityCtr.text : 'Not set'),
+            _InfoItem('Address', _addressCtr.text.isNotEmpty ? _addressCtr.text : 'Not set'),
+            if (_cnicCtr.text.isNotEmpty) _InfoItem('CNIC', _cnicCtr.text),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildInfoCard(
+          title: 'Emergency Contact',
+          icon: Icons.emergency,
+          items: [
+            _InfoItem('Name', _emgNameCtr.text.isNotEmpty ? _emgNameCtr.text : 'Not set'),
+            _InfoItem('Phone', _emgPhoneCtr.text.isNotEmpty ? _emgPhoneCtr.text : 'Not set'),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildInfoCard(
+          title: 'Account Status',
+          icon: Icons.verified_user,
+          items: [
+            _InfoItem('Profile', completed ? 'Complete ✓' : 'Incomplete'),
+            _InfoItem('Verification', verified ? 'Verified ✓' : 'Pending'),
+            _InfoItem('Role', 'Donor'),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoCard({
+    required String title,
+    required IconData icon,
+    required List<_InfoItem> items,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: BloodAppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: BloodAppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: BloodAppTheme.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: BloodAppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...items.map((item) => _buildInfoRow(item)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(_InfoItem item) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              item.label,
+              style: TextStyle(
+                fontSize: 13,
+                color: BloodAppTheme.textSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              item.value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: item.highlight ? FontWeight.bold : FontWeight.w500,
+                color: item.highlight
+                    ? BloodAppTheme.getBloodTypeColor(item.value)
+                    : BloodAppTheme.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditableSection(Map<String, dynamic> data) {
+    return Column(
+      children: [
+        _buildEditCard(
+          title: 'Personal Information',
+          icon: Icons.person,
+          children: [
+            _buildTextField('Full Name', _nameCtr, validator: (v) => v?.isEmpty == true ? 'Required' : null),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: _buildDropdown('Gender', _genders, _gender, (v) => setState(() => _gender = v))),
+                const SizedBox(width: 12),
+                Expanded(child: _buildDateField()),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildDropdown('Blood Type', _bloodTypes, _bloodType, (v) => setState(() => _bloodType = v)),
+            const SizedBox(height: 12),
+            _buildTextField('About (optional)', _aboutCtr, maxLines: 2),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildEditCard(
+          title: 'Contact Information',
+          icon: Icons.contact_phone,
+          children: [
+            _buildTextField('Phone Number', _phoneCtr, keyboardType: TextInputType.phone),
+            const SizedBox(height: 12),
+            _buildTextField('City', _cityCtr),
+            const SizedBox(height: 12),
+            _buildTextField('Address', _addressCtr, maxLines: 2),
+            const SizedBox(height: 12),
+            _buildTextField('CNIC (optional)', _cnicCtr),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildEditCard(
+          title: 'Emergency Contact',
+          icon: Icons.emergency,
+          children: [
+            _buildTextField('Contact Name', _emgNameCtr),
+            const SizedBox(height: 12),
+            _buildTextField('Contact Phone', _emgPhoneCtr, keyboardType: TextInputType.phone),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditCard({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: BloodAppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: BloodAppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: BloodAppTheme.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: BloodAppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextField(
+    String label,
+    TextEditingController controller, {
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      validator: validator,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: label,
+        filled: true,
+        fillColor: BloodAppTheme.background,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: BloodAppTheme.primary, width: 2),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDropdown(String label, List<String> items, String? value, Function(String?) onChanged) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        filled: true,
+        fillColor: BloodAppTheme.background,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      items: items.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _buildDateField() {
+    return InkWell(
+      onTap: _pickDob,
+      borderRadius: BorderRadius.circular(12),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: 'Date of Birth',
+          filled: true,
+          fillColor: BloodAppTheme.background,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        child: Text(
+          _dob == null ? 'Select' : '${_dob!.day}/${_dob!.month}/${_dob!.year}',
+          style: TextStyle(
+            color: _dob == null ? BloodAppTheme.textSecondary : BloodAppTheme.textPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () => setState(() => _editing = true),
+        icon: const Icon(Icons.edit),
+        label: const Text('Edit Profile'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: BloodAppTheme.primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _saving ? null : _save,
+        icon: _saving
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.save),
+        label: Text(_saving ? 'Saving...' : 'Save Changes'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: BloodAppTheme.success,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCancelButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: _saving ? null : () => setState(() => _editing = false),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: BloodAppTheme.textSecondary,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          side: BorderSide(color: BloodAppTheme.textSecondary.withOpacity(0.3)),
+        ),
+        child: const Text('Cancel'),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _logout,
+        icon: const Icon(Icons.logout, color: BloodAppTheme.error),
+        label: const Text('Sign Out'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: BloodAppTheme.error,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          side: const BorderSide(color: BloodAppTheme.error),
+        ),
+      ),
+    );
+  }
+
+  void _hydrate(Map<String, dynamic> data) {
+    if (_editing) return;
+
+    _nameCtr.text = (data['fullName'] ?? data['name'] ?? '').toString();
+    _phoneCtr.text = (data['phone'] ?? data['phoneNumber'] ?? '').toString();
+    _cityCtr.text = (data['city'] ?? '').toString();
+    _addressCtr.text = (data['address'] ?? '').toString();
+    _aboutCtr.text = (data['about'] ?? '').toString();
+    _cnicCtr.text = (data['cnic'] ?? '').toString();
+    _emgNameCtr.text = (data['emergencyContactName'] ?? '').toString();
+    _emgPhoneCtr.text = (data['emergencyContactPhone'] ?? '').toString();
+    _bloodType = (data['bloodType'] ?? data['bloodGroup'])?.toString();
+    _gender = data['gender']?.toString();
 
     final d = data['dob'];
     if (d is Timestamp) {
@@ -344,68 +728,24 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
     } else if (d is String && d.isNotEmpty) {
       _dob = DateTime.tryParse(d);
     }
-
-    _otherCtrs.forEach((_, c) => c.dispose());
-    _otherCtrs.clear();
-    for (final e in data.entries) {
-      final k = e.key; final v = e.value;
-      if (_knownKeys.contains(k)) continue;
-      if (v is String) {
-        _otherCtrs[k] = TextEditingController(text: v);
-      }
-    }
   }
 
   Future<void> _pickDob() async {
     final now = DateTime.now();
-    final initial = _dob ?? DateTime(now.year - 20, now.month, now.day);
-    final first   = DateTime(now.year - 100, 1, 1);
-    final last    = DateTime(now.year - 10, 12, 31);
-    final picked = await showDatePicker(context: context, initialDate: initial, firstDate: first, lastDate: last);
-    if (picked != null) setState(()=> _dob = picked);
-  }
-
-  Future<void> _addCustomFieldDialog() async {
-    String key=''; String value='';
-    final reserved = {..._knownKeys, ..._otherCtrs.keys};
-
-    await showDialog(
+    final picked = await showDatePicker(
       context: context,
-      builder: (_)=> AlertDialog(
-        title: const Text('Add custom field'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(decoration: const InputDecoration(labelText: 'Field key'), onChanged: (v)=> key=v.trim()),
-            const SizedBox(height: 8),
-            TextField(decoration: const InputDecoration(labelText: 'Field value'), onChanged: (v)=> value=v),
-            const SizedBox(height: 6),
-            const Text('Note: only string values are supported here.', style: TextStyle(fontSize: 12, color: Colors.black54)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: (){
-              if (key.isEmpty || reserved.contains(key)) return;
-              Navigator.pop(context);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
+      initialDate: _dob ?? DateTime(now.year - 20),
+      firstDate: DateTime(now.year - 100),
+      lastDate: DateTime(now.year - 16),
     );
-
-    if (key.isNotEmpty && !reserved.contains(key)) {
-      setState(()=> _otherCtrs[key] = TextEditingController(text: value));
-    }
+    if (picked != null) setState(() => _dob = picked);
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final uid = _auth.currentUser!.uid;
 
-    setState(()=> _saving = true);
+    setState(() => _saving = true);
     try {
       final updates = <String, dynamic>{
         'fullName': _nameCtr.text.trim(),
@@ -419,7 +759,6 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
         'bloodType': _bloodType,
         'gender': _gender,
         'dob': _dob != null ? Timestamp.fromDate(_dob!) : null,
-        // completion rule
         'profileCompleted': _nameCtr.text.trim().isNotEmpty &&
             _phoneCtr.text.trim().isNotEmpty &&
             _cityCtr.text.trim().isNotEmpty &&
@@ -428,180 +767,59 @@ class _DonorProfileScreenState extends State<DonorProfileScreen> {
       };
 
       updates.removeWhere((k, v) => v == null);
-      for (final e in _otherCtrs.entries) {
-        updates[e.key] = e.value.text;
-      }
 
       await FirebaseFirestore.instance.collection('users').doc(uid).set(
         updates,
         SetOptions(merge: true),
       );
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
-      setState(()=> _editing = false);
+      if (mounted) {
+        AppSnackbar.showSuccess(context, 'Profile updated successfully!');
+        setState(() => _editing = false);
+      }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+      if (mounted) {
+        AppSnackbar.showError(context, 'Update failed', subtitle: e.toString());
+      }
     } finally {
-      if (mounted) setState(()=> _saving = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 
-  // ---- UI helpers ----
-
-  Widget _section(String title, Widget child, {Widget? trailing}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 12, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text(title,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w700, color: Colors.blueGrey[900]),
-              )),
-              if (trailing != null) ...[const SizedBox(width: 8), trailing],
-            ],
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
-          const SizedBox(height: 12),
-          child,
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.error),
+            child: const Text('Sign Out'),
+          ),
         ],
       ),
     );
-  }
 
-  Widget _tf(String label, TextEditingController ctr, {bool enabled=true, TextInputType? keyboardType, String? Function(String?)? validator, int maxLines=1}) {
-    return TextFormField(
-      controller: ctr,
-      enabled: enabled,
-      keyboardType: keyboardType,
-      validator: validator,
-      maxLines: maxLines,
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        isDense: maxLines == 1,
-        disabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade300)),
-      ),
-    );
-  }
-
-  Widget _kv(String k, String v) {
-    return Row(
-      children: [
-        Expanded(flex: 4, child: Text(k, maxLines:1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
-        const SizedBox(width: 8),
-        Expanded(flex: 6, child: Text(v.isEmpty?'-':v, maxLines:1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right)),
-      ],
-    );
+    if (confirm == true) {
+      await AuthService().signOut();
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      }
+    }
   }
 }
 
-class _Header extends StatelessWidget {
-  final String name;
-  final String email;
-  final String role;
-  final bool verified;
-  final bool completed;
-  final String photoUrl;
+class _InfoItem {
+  final String label;
+  final String value;
+  final bool highlight;
 
-  const _Header({
-    required this.name,
-    required this.email,
-    required this.role,
-    required this.verified,
-    required this.completed,
-    required this.photoUrl,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF67D5B5), Color(0xFF4AB9C5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF67D5B5).withOpacity(0.25),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 26,
-            backgroundColor: Colors.white,
-            backgroundImage: (photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
-            child: (photoUrl.isEmpty)
-                ? Text(
-              name.isNotEmpty ? name[0].toUpperCase() : 'U',
-              style: const TextStyle(
-                color: Color(0xFF2C8D7C),
-                fontWeight: FontWeight.w800,
-                fontSize: 20,
-              ),
-            )
-                : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name.isEmpty ? 'Your Name' : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16.5)),
-                const SizedBox(height: 3),
-                Text(email,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.w500)),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    _chip(completed ? 'Complete' : 'Incomplete',
-                        Colors.white, textColor: completed ? const Color(0xFF2C8D7C) : Colors.black87),
-                    _chip(verified ? 'Verified' : 'Unverified',
-                        Colors.white, textColor: verified ? const Color(0xFF2C8D7C) : Colors.orange.shade800),
-                    _chip(role.isEmpty ? 'Donor' : role, Colors.white, textColor: Colors.black87),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(String label, Color bg, {Color textColor = Colors.black87}) {
-    return Chip(
-      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.w700, color: textColor)),
-      backgroundColor: bg,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-  }
+  _InfoItem(this.label, this.value, {this.highlight = false});
 }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/theme.dart';
+import '../../../widgets/custom_snackbar.dart';
+import '../../../services/admin_notification_service.dart';
 
 class HospitalProfileCompletionScreen extends StatefulWidget {
   @override
@@ -166,6 +169,16 @@ class _HospitalProfileCompletionScreenState extends State<HospitalProfileComplet
         throw Exception("Not logged in. Please log in again.");
       }
 
+      // Check if this is a new profile or update
+      final existingDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final isNewProfile = !existingDoc.exists || 
+          (existingDoc.data()?['profileCompleted'] ?? false) == false;
+      final wasCompleted = existingDoc.data()?['profileCompleted'] ?? false;
+      final isNowCompleted = completionScore == 1.0;
+
       final data = {
         'hospitalName': hospitalNameCtrl.text.trim(),
         'registrationNo': registrationCtrl.text.trim(),
@@ -180,47 +193,71 @@ class _HospitalProfileCompletionScreenState extends State<HospitalProfileComplet
         'available24Hours': available24Hours,
         'preferredContactMethod': contactMethod,
         'emergencyPhone': emergencyPhoneCtrl.text.trim(),
-        'profileCompleted': completionScore == 1.0,
+        'profileCompleted': isNowCompleted,
         'userType': 'hospital',
-        'isVerified': false, // Admin will verify later
+        'isVerified': false,
         'totalRequests': 0,
         'activeRequests': 0,
-        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      print("Saving hospital profile for UID: ${user.uid}");
-      print("Hospital data: $data");
+      // Add profileCompletedAt timestamp if just completed
+      if (isNowCompleted && !wasCompleted) {
+        data['profileCompletedAt'] = FieldValue.serverTimestamp();
+      }
+
+      // Preserve createdAt if it exists
+      if (existingDoc.exists && existingDoc.data()?['createdAt'] != null) {
+        data['createdAt'] = existingDoc.data()!['createdAt'];
+      } else {
+        data['createdAt'] = FieldValue.serverTimestamp();
+      }
 
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .set(data, SetOptions(merge: true));
 
-      print("Hospital profile successfully saved!");
+      // Notify admin if profile was completed or updated
+      if (isNowCompleted || !isNewProfile) {
+        await adminNotificationService.notifyProfileUpdate(
+          userId: user.uid,
+          userEmail: emailCtrl.text.trim(),
+          role: 'hospital',
+          name: hospitalNameCtrl.text.trim(),
+          isNewProfile: isNewProfile && isNowCompleted,
+        );
+      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(completionScore == 1.0
-              ? "Hospital Profile Completed Successfully!"
-              : "Profile Saved Successfully!"),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        if (isNowCompleted) {
+          AppSnackbar.showSuccess(
+            context,
+            'Profile Completed Successfully!',
+            subtitle: 'Your profile has been submitted for admin approval.',
+          );
+        } else {
+          AppSnackbar.showSuccess(
+            context,
+            'Profile Saved Successfully!',
+            subtitle: 'Continue filling to complete your profile.',
+          );
+        }
+      }
 
-      // Navigate back only if profile is 100% complete
-      if (completionScore == 1.0) {
+      if (isNowCompleted) {
         Navigator.pop(context, true);
       }
 
     } catch (e) {
       print("Error saving hospital profile: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Error saving profile: ${e.toString()}"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        AppSnackbar.showError(
+          context,
+          'Error saving profile',
+          subtitle: e.toString(),
+        );
+      }
     } finally {
       setState(() => _isLoading = false);
     }

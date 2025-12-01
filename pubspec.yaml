@@ -34,6 +34,8 @@ dependencies:
   provider: ^6.1.1
   permission_handler: ^11.0.1
   syncfusion_flutter_charts: ^30.2.7
+  googleapis: ^15.0.0
+  googleapis_auth: ^2.0.0
 
   # ---- UI ----
   cupertino_icons: ^1.0.8
@@ -48,10 +50,11 @@ flutter:
   assets:
     - lib/assets/images/logo.png
     - lib/assets/images/google_logo.png
-#    - lib/assets/lifedrop-5f112-firebase-adminsdk-fbsvc-af12b6f5a5.json
+    - lib/assets/service_account.json
+
   uses-material-design: true
 
-flutter_icons:
+flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/logo.png"
+  image_path: "lib/assets/images/logo.png"

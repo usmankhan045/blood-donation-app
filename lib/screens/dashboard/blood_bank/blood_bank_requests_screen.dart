@@ -2,52 +2,40 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../models/blood_request_model.dart';
+import '../../../repositories/blood_request_repository.dart';
 import '../../../widgets/modern_request_card.dart';
 import '../../../widgets/custom_snackbar.dart';
 import '../../../core/theme.dart';
-import '../../chat/chat_screen.dart';
+import 'dart:async';
 
-class RecipientMyRequestsScreen extends StatefulWidget {
-  const RecipientMyRequestsScreen({super.key});
+class BloodBankRequestsScreen extends StatefulWidget {
+  const BloodBankRequestsScreen({super.key});
 
   @override
-  State<RecipientMyRequestsScreen> createState() => _RecipientMyRequestsScreenState();
+  State<BloodBankRequestsScreen> createState() => _BloodBankRequestsScreenState();
 }
 
-class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
+class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
     with SingleTickerProviderStateMixin {
+  final _repo = BloodRequestRepository.instance;
+  final _uid = FirebaseAuth.instance.currentUser!.uid;
+
   late TabController _tabController;
-  String _selectedFilter = 'all';
-
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Stream<List<BloodRequest>>? _requestsStream;
+  Timer? _updateTimer;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _initializeStream();
-  }
-
-  void _initializeStream() {
-    final userId = _auth.currentUser?.uid;
-    if (userId != null) {
-      _requestsStream = _firestore
-          .collection('blood_requests')
-          .where('requesterId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
-          .snapshots()
-          .map((snapshot) => snapshot.docs
-              .map((doc) => BloodRequest.fromDoc(doc))
-              .toList());
-    }
+    _tabController = TabController(length: 3, vsync: this);
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _updateTimer?.cancel();
     super.dispose();
   }
 
@@ -60,18 +48,10 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
         controller: _tabController,
         physics: const BouncingScrollPhysics(),
         children: [
-          _buildCurrentRequestsTab(),
-          _buildHistoryTab(),
+          _buildAvailableRequests(),
+          _buildAcceptedRequests(),
+          _buildHistory(),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.pushNamed(context, '/recipient/request'),
-        backgroundColor: BloodAppTheme.accent,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          'New Request',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
       ),
     );
   }
@@ -82,27 +62,24 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
       backgroundColor: BloodAppTheme.primary,
       foregroundColor: Colors.white,
       title: const Text(
-        'My Blood Requests',
+        'Blood Requests',
         style: TextStyle(fontWeight: FontWeight.bold),
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.refresh),
-          onPressed: () => setState(() => _initializeStream()),
-          tooltip: 'Refresh',
-        ),
-      ],
       bottom: TabBar(
         controller: _tabController,
         labelColor: Colors.white,
         unselectedLabelColor: Colors.white60,
         indicatorColor: Colors.white,
         indicatorWeight: 3,
-        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         tabs: const [
           Tab(
-            icon: Icon(Icons.pending_actions, size: 22),
-            text: 'Active',
+            icon: Icon(Icons.notifications_active, size: 22),
+            text: 'Available',
+          ),
+          Tab(
+            icon: Icon(Icons.check_circle, size: 22),
+            text: 'Accepted',
           ),
           Tab(
             icon: Icon(Icons.history, size: 22),
@@ -113,9 +90,9 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
     );
   }
 
-  Widget _buildCurrentRequestsTab() {
+  Widget _buildAvailableRequests() {
     return StreamBuilder<List<BloodRequest>>(
-      stream: _requestsStream,
+      stream: _repo.getAvailableRequestsForBloodBank(_uid),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoadingState();
@@ -125,52 +102,37 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
           return _buildErrorState('Error loading requests');
         }
 
-        final allRequests = snapshot.data ?? [];
-        
-        // Filter for current (active + accepted) and not expired
-        final currentRequests = allRequests
-            .where((r) => (r.isActive || r.isAccepted) && !r.isExpired)
-            .toList();
-        
-        final filteredRequests = _filterRequests(currentRequests, isHistory: false);
+        final requests = snapshot.data ?? [];
+        final activeRequests = requests.where((r) => !r.isExpired).toList();
 
-        if (currentRequests.isEmpty) {
+        if (activeRequests.isEmpty) {
           return _buildEmptyState(
-            icon: Icons.bloodtype_outlined,
+            icon: Icons.inbox_outlined,
             title: 'No Active Requests',
-            subtitle: 'Create a blood request to find\ndonors in your area.',
-            showCreateButton: true,
+            subtitle: 'You\'ll be notified when new requests\nmatch your inventory.',
           );
         }
 
         return Column(
           children: [
-            // Stats Header
-            _buildStatsHeader(currentRequests),
-
-            // Filter Chips
-            _buildFilterChips(isHistory: false),
-
-            // Request List
+            _buildStatsHeader(activeRequests),
             Expanded(
               child: RefreshIndicator(
-                onRefresh: () async => setState(() => _initializeStream()),
+                onRefresh: () async => setState(() {}),
                 color: BloodAppTheme.primary,
                 child: ListView.builder(
                   physics: const BouncingScrollPhysics(
                     parent: AlwaysScrollableScrollPhysics(),
                   ),
-                  padding: const EdgeInsets.only(bottom: 100),
-                  itemCount: filteredRequests.length,
+                  padding: const EdgeInsets.only(bottom: 20),
+                  itemCount: activeRequests.length,
                   itemBuilder: (context, index) {
-                    final request = filteredRequests[index];
+                    final request = activeRequests[index];
                     return ModernRequestCard(
                       request: request,
-                      isRecipientView: true,
-                      onCancel: request.isActive ? () => _cancelRequest(request) : null,
-                      onComplete: request.isAccepted ? () => _completeRequest(request) : null,
+                      isRecipientView: false,
+                      onAccept: () => _acceptRequest(request),
                       onViewDetails: () => _showRequestDetails(request),
-                      onChat: request.isAccepted ? () => _openChat(request) : null,
                       showActions: true,
                     );
                   },
@@ -183,9 +145,74 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
     );
   }
 
-  Widget _buildHistoryTab() {
-    return StreamBuilder<List<BloodRequest>>(
-      stream: _requestsStream,
+  Widget _buildAcceptedRequests() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('blood_requests')
+          .where('acceptedBy', isEqualTo: _uid)
+          .where('acceptedByType', isEqualTo: 'blood_bank')
+          .where('status', isEqualTo: 'accepted')
+          .orderBy('acceptedAt', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildLoadingState();
+        }
+
+        if (snapshot.hasError) {
+          return _buildErrorState('Error loading requests');
+        }
+
+        final requests = snapshot.data?.docs
+                .map((doc) => BloodRequest.fromMap(
+                    doc.data() as Map<String, dynamic>, doc.id))
+                .toList() ??
+            [];
+
+        if (requests.isEmpty) {
+          return _buildEmptyState(
+            icon: Icons.check_circle_outline,
+            title: 'No Accepted Requests',
+            subtitle: 'Accepted requests will appear here.',
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: () async => setState(() {}),
+          color: BloodAppTheme.primary,
+          child: ListView.builder(
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            padding: const EdgeInsets.only(bottom: 20),
+            itemCount: requests.length,
+            itemBuilder: (context, index) {
+              final request = requests[index];
+              return ModernRequestCard(
+                request: request,
+                isRecipientView: false,
+                onComplete: () => _completeRequest(request),
+                onViewDetails: () => _showRequestDetails(request),
+                showActions: true,
+                showTimer: false,
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHistory() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('blood_requests')
+          .where('acceptedBy', isEqualTo: _uid)
+          .where('acceptedByType', isEqualTo: 'blood_bank')
+          .where('status', whereIn: ['completed', 'cancelled', 'expired'])
+          .orderBy('updatedAt', descending: true)
+          .limit(50)
+          .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoadingState();
@@ -195,64 +222,47 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
           return _buildErrorState('Error loading history');
         }
 
-        final allRequests = snapshot.data ?? [];
-        
-        // Filter for history (completed, expired, cancelled)
-        final historyRequests = allRequests
-            .where((r) => r.isCompleted || r.isExpiredStatus || r.isCancelled || r.isExpired)
-            .toList();
-        
-        final filteredRequests = _filterRequests(historyRequests, isHistory: true);
+        final requests = snapshot.data?.docs
+                .map((doc) => BloodRequest.fromMap(
+                    doc.data() as Map<String, dynamic>, doc.id))
+                .toList() ??
+            [];
 
-        if (historyRequests.isEmpty) {
+        if (requests.isEmpty) {
           return _buildEmptyState(
             icon: Icons.history,
-            title: 'No History Yet',
-            subtitle: 'Your completed, expired, and cancelled\nrequests will appear here.',
+            title: 'No History',
+            subtitle: 'Completed requests will appear here.',
           );
         }
 
-        return Column(
-          children: [
-            // History Stats
-            _buildHistoryStats(historyRequests),
-
-            // Filter Chips
-            _buildFilterChips(isHistory: true),
-
-            // Request List
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () async => setState(() => _initializeStream()),
-                color: BloodAppTheme.primary,
-                child: ListView.builder(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  padding: const EdgeInsets.only(bottom: 20),
-                  itemCount: filteredRequests.length,
-                  itemBuilder: (context, index) {
-                    final request = filteredRequests[index];
-                    return ModernRequestCard(
-                      request: request,
-                      isRecipientView: true,
-                      onViewDetails: () => _showRequestDetails(request),
-                      showActions: false,
-                      showTimer: false,
-                    );
-                  },
-                ),
-              ),
+        return RefreshIndicator(
+          onRefresh: () async => setState(() {}),
+          color: BloodAppTheme.primary,
+          child: ListView.builder(
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
             ),
-          ],
+            padding: const EdgeInsets.only(bottom: 20),
+            itemCount: requests.length,
+            itemBuilder: (context, index) {
+              final request = requests[index];
+              return ModernRequestCard(
+                request: request,
+                isRecipientView: false,
+                onViewDetails: () => _showRequestDetails(request),
+                showActions: false,
+                showTimer: false,
+              );
+            },
+          ),
         );
       },
     );
   }
 
   Widget _buildStatsHeader(List<BloodRequest> requests) {
-    final active = requests.where((r) => r.isActive).length;
-    final accepted = requests.where((r) => r.isAccepted).length;
+    final urgent = requests.where((r) => r.urgency == 'emergency' || r.urgency == 'high').length;
     final expiring = requests.where((r) => r.isAboutToExpire).length;
 
     return Container(
@@ -270,10 +280,10 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
         children: [
           Row(
             children: [
-              const Icon(Icons.pending_actions, color: Colors.white, size: 20),
+              const Icon(Icons.notifications_active, color: Colors.white, size: 20),
               const SizedBox(width: 8),
               const Text(
-                'Current Requests',
+                'Available Requests',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
@@ -301,90 +311,15 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
           const SizedBox(height: 16),
           Row(
             children: [
-              _buildStatBadge('Active', active, BloodAppTheme.warning),
+              _buildStatBadge('Total', requests.length, Colors.white),
               const SizedBox(width: 12),
-              _buildStatBadge('Accepted', accepted, BloodAppTheme.success),
+              _buildStatBadge('Urgent', urgent, BloodAppTheme.accent),
               const SizedBox(width: 12),
-              _buildStatBadge('Expiring', expiring, BloodAppTheme.error),
+              _buildStatBadge('Expiring', expiring, BloodAppTheme.warning),
             ],
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildHistoryStats(List<BloodRequest> requests) {
-    final completed = requests.where((r) => r.isCompleted).length;
-    final expired = requests.where((r) => r.isExpiredStatus || r.isExpired).length;
-    final cancelled = requests.where((r) => r.isCancelled).length;
-
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
-        boxShadow: BloodAppTheme.cardShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.history, color: BloodAppTheme.textSecondary, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Request History',
-                style: TextStyle(
-                  color: BloodAppTheme.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildHistoryStatItem(Icons.check_circle, completed, 'Completed', BloodAppTheme.success),
-              _buildHistoryStatItem(Icons.timer_off, expired, 'Expired', BloodAppTheme.error),
-              _buildHistoryStatItem(Icons.cancel, cancelled, 'Cancelled', BloodAppTheme.textSecondary),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryStatItem(IconData icon, int count, String label, Color color) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color, size: 24),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          count.toString(),
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: BloodAppTheme.textSecondary,
-          ),
-        ),
-      ],
     );
   }
 
@@ -407,7 +342,7 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
           Text(
             '$count',
             style: TextStyle(
-              color: color,
+              color: color == Colors.white ? BloodAppTheme.primary : color,
               fontWeight: FontWeight.bold,
               fontSize: 14,
             ),
@@ -418,62 +353,6 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
             style: TextStyle(color: BloodAppTheme.textSecondary, fontSize: 12),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChips({required bool isHistory}) {
-    final filters = isHistory
-        ? ['all', 'completed', 'expired', 'cancelled']
-        : ['all', 'active', 'accepted', 'expiring'];
-
-    final filterLabels = {
-      'all': 'All',
-      'active': 'Active',
-      'accepted': 'Accepted',
-      'expiring': 'Expiring',
-      'completed': 'Completed',
-      'expired': 'Expired',
-      'cancelled': 'Cancelled',
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Row(
-          children: filters.map((filter) {
-            final isSelected = _selectedFilter == filter;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(
-                  filterLabels[filter]!,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : BloodAppTheme.textPrimary,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 13,
-                  ),
-                ),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() => _selectedFilter = filter);
-                },
-                backgroundColor: Colors.white,
-                selectedColor: BloodAppTheme.primary,
-                checkmarkColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(
-                    color: isSelected ? BloodAppTheme.primary : Colors.grey.shade300,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
       ),
     );
   }
@@ -525,7 +404,7 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => setState(() => _initializeStream()),
+              onPressed: () => setState(() {}),
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
             ),
@@ -539,7 +418,6 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
     required IconData icon,
     required String title,
     required String subtitle,
-    bool showCreateButton = false,
   }) {
     return Center(
       child: Padding(
@@ -574,50 +452,20 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
               style: TextStyle(color: BloodAppTheme.textSecondary, fontSize: 14),
               textAlign: TextAlign.center,
             ),
-            if (showCreateButton) ...[
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () => Navigator.pushNamed(context, '/recipient/request'),
-                icon: const Icon(Icons.add),
-                label: const Text('Create Request'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: BloodAppTheme.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
 
-  List<BloodRequest> _filterRequests(List<BloodRequest> requests, {required bool isHistory}) {
-    if (_selectedFilter == 'all') return requests;
+  Future<void> _acceptRequest(BloodRequest request) async {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_uid)
+        .get();
+    final bloodBankName = userDoc.data()?['bloodBankName'] ?? 'Blood Bank';
 
-    return requests.where((request) {
-      switch (_selectedFilter) {
-        case 'active':
-          return request.isActive;
-        case 'accepted':
-          return request.isAccepted;
-        case 'expiring':
-          return request.isAboutToExpire || request.isCritical;
-        case 'completed':
-          return request.isCompleted;
-        case 'expired':
-          return request.isExpiredStatus || request.isExpired;
-        case 'cancelled':
-          return request.isCancelled;
-        default:
-          return true;
-      }
-    }).toList();
-  }
-
-  Future<void> _cancelRequest(BloodRequest request) async {
-    final confirmed = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(
@@ -628,52 +476,83 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: BloodAppTheme.warning.withOpacity(0.1),
+                color: BloodAppTheme.success.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.cancel, color: BloodAppTheme.warning),
+              child: const Icon(Icons.check, color: BloodAppTheme.success),
             ),
             const SizedBox(width: 12),
-            const Text('Cancel Request?'),
+            const Text('Accept Request?'),
           ],
         ),
-        content: const Text(
-          'Are you sure you want to cancel this blood request? This action cannot be undone.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Blood Type: ${request.bloodType}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text('Requester: ${request.requesterName}'),
+            Text('Units: ${request.units}'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.info.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: BloodAppTheme.info, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This request will be assigned to your blood bank.',
+                      style: TextStyle(fontSize: 12, color: BloodAppTheme.info),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep Request'),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.warning),
-            child: const Text('Cancel Request'),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.success),
+            child: const Text('Accept'),
           ),
         ],
       ),
     );
 
-    if (confirmed == true) {
-      try {
-        await _firestore.collection('blood_requests').doc(request.id).update({
-          'status': 'cancelled',
-          'cancelledAt': FieldValue.serverTimestamp(),
-        });
+    if (confirm != true) return;
 
-        if (mounted) {
-          AppSnackbar.showSuccess(context, 'Request cancelled successfully');
-        }
-      } catch (e) {
-        if (mounted) {
-          AppSnackbar.showError(context, 'Failed to cancel request', subtitle: e.toString());
-        }
+    try {
+      await _repo.acceptRequestByBloodBank(request.id, _uid, bloodBankName);
+
+      if (mounted) {
+        AppSnackbar.showSuccess(
+          context,
+          'Request accepted successfully!',
+          subtitle: 'Contact the recipient to coordinate',
+        );
+        _tabController.animateTo(1);
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Failed to accept request', subtitle: e.toString());
       }
     }
   }
 
   Future<void> _completeRequest(BloodRequest request) async {
-    final confirmed = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(
@@ -693,13 +572,11 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
             const Text('Complete Request?'),
           ],
         ),
-        content: const Text(
-          'Confirm that you have received the blood donation. This will mark the request as completed.',
-        ),
+        content: const Text('Mark this request as completed?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Not Yet'),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -710,24 +587,22 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
       ),
     );
 
-    if (confirmed == true) {
-      try {
-        await _firestore.collection('blood_requests').doc(request.id).update({
-          'status': 'completed',
-          'completedAt': FieldValue.serverTimestamp(),
-        });
+    if (confirm != true) return;
 
-        if (mounted) {
-          AppSnackbar.showSuccess(
-            context,
-            'Request completed! 🎉',
-            subtitle: 'Thank you for using LifeDrop',
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          AppSnackbar.showError(context, 'Failed to complete request');
-        }
+    try {
+      await _repo.completeRequest(request.id);
+
+      if (mounted) {
+        AppSnackbar.showSuccess(
+          context,
+          'Request completed! 🎉',
+          subtitle: 'Thank you for saving a life',
+        );
+        _tabController.animateTo(2);
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Failed to complete request', subtitle: e.toString());
       }
     }
   }
@@ -738,20 +613,6 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _RequestDetailsSheet(request: request),
-    );
-  }
-
-  void _openChat(BloodRequest request) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatScreen(
-          threadId: request.id,
-          title: request.acceptedByName ?? 'Donor',
-          subtitle: '${request.bloodType} Blood Request',
-          otherUserName: request.acceptedByName,
-        ),
-      ),
     );
   }
 }
@@ -859,6 +720,7 @@ class _RequestDetailsSheet extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildDetailRow('Requester', request.requesterName, Icons.person),
                   _buildDetailRow('Units Required', '${request.units} unit(s)', Icons.water_drop),
                   _buildDetailRow('Urgency', request.urgency.toUpperCase(), Icons.priority_high),
                   _buildDetailRow('City', request.city, Icons.location_city),
@@ -870,13 +732,6 @@ class _RequestDetailsSheet extends StatelessWidget {
                   if (request.notes != null && request.notes!.isNotEmpty)
                     _buildDetailRow('Notes', request.notes!, Icons.note),
                   _buildDetailRow('Status', request.statusText, Icons.info),
-                  _buildDetailRow('Created', _formatDateTime(request.createdAt), Icons.access_time),
-                  if (request.acceptedByName != null)
-                    _buildDetailRow('Accepted By', request.acceptedByName!, Icons.person),
-                  if (request.acceptedAt != null)
-                    _buildDetailRow('Accepted At', _formatDateTime(request.acceptedAt), Icons.check),
-                  if (request.completedAt != null)
-                    _buildDetailRow('Completed At', _formatDateTime(request.completedAt), Icons.verified),
                 ],
               ),
             ),
@@ -924,10 +779,5 @@ class _RequestDetailsSheet extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _formatDateTime(DateTime? dateTime) {
-    if (dateTime == null) return 'N/A';
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year} at ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 }

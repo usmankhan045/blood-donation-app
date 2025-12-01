@@ -1,158 +1,176 @@
-import 'package:flutter/scheduler.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:googleapis_auth/auth_io.dart' as auth;
 
+/// 🔥 PRODUCTION-READY FCM SERVICE WITH ACTUAL DELIVERY
+/// Sends notifications directly via FCM HTTP v1 API
 class FCMService {
   static final FCMService _instance = FCMService._internal();
   factory FCMService() => _instance;
   FCMService._internal();
 
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<void> sendNotification({
+  String? _cachedAccessToken;
+  DateTime? _tokenExpiry;
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🔐 GET OAUTH2 ACCESS TOKEN FROM SERVICE ACCOUNT
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<String> _getAccessToken() async {
+    try {
+      if (_cachedAccessToken != null &&
+          _tokenExpiry != null &&
+          DateTime.now().isBefore(_tokenExpiry!.subtract(Duration(minutes: 5)))) {
+        return _cachedAccessToken!;
+      }
+
+      final serviceAccountJson = await rootBundle.loadString('lib/assets/service_account.json');
+      final accountCredentials = auth.ServiceAccountCredentials.fromJson(
+        json.decode(serviceAccountJson),
+      );
+
+      final scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
+      final authClient = await auth.clientViaServiceAccount(accountCredentials, scopes);
+
+      final accessToken = authClient.credentials.accessToken.data;
+      _cachedAccessToken = accessToken;
+      _tokenExpiry = authClient.credentials.accessToken.expiry;
+
+      authClient.close();
+
+      print('✅ OAuth2 access token obtained (expires: $_tokenExpiry)');
+      return accessToken;
+
+    } catch (e) {
+      print('❌ Error getting access token: $e');
+      rethrow;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🚀 SEND NOTIFICATION VIA FCM HTTP v1 API
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<bool> sendNotification({
     required String token,
     required String title,
     required String body,
     required Map<String, dynamic> data,
   }) async {
     try {
-      print('🚀 SENDING REAL FCM NOTIFICATION:');
-      print('   Token: ${token.length > 20 ? '${token.substring(0, 20)}...' : token}');
+      print('🚀 SENDING FCM NOTIFICATION:');
+      print('   Token: ${token.substring(0, 20)}...');
       print('   Title: $title');
-      print('   Body: $body');
-      print('   Data: $data');
 
-      // Send REAL FCM notification using HTTP API (correct method)
-      await _sendViaHttpAPI(
+      final accessToken = await _getAccessToken();
+      final serviceAccountJson = await rootBundle.loadString('lib/assets/service_account.json');
+      final serviceAccount = json.decode(serviceAccountJson);
+      final projectId = serviceAccount['project_id'];
+
+      final url = 'https://fcm.googleapis.com/v1/projects/$projectId/messages:send';
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: json.encode({
+          'message': {
+            'token': token,
+            'notification': {
+              'title': title,
+              'body': body,
+            },
+            'data': data.map((key, value) => MapEntry(key, value.toString())),
+            'android': {
+              'priority': data['urgency'] == 'emergency' ? 'high' : 'normal',
+              'notification': {
+                'sound': 'default',
+                'channel_id': 'blood_requests',
+              },
+            },
+            'apns': {
+              'payload': {
+                'aps': {
+                  'sound': 'default',
+                  'badge': 1,
+                },
+              },
+            },
+          },
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ FCM notification sent successfully');
+        return true;
+      } else {
+        print('❌ FCM send failed: ${response.statusCode}');
+        print('   Response: ${response.body}');
+        return false;
+      }
+
+    } catch (e) {
+      print('❌ Error sending FCM notification: $e');
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 📤 SEND NOTIFICATION WITH FIRESTORE BACKUP
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> sendNotificationWithBackup({
+    required String token,
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) async {
+    try {
+      final success = await sendNotification(
         token: token,
         title: title,
         body: body,
         data: data,
       );
 
-      print('✅ REAL FCM notification sent successfully');
-      print('   ──────────────────────────────────────────');
+      if (success) {
+        print('✅ Notification delivered immediately');
+        return;
+      }
 
-    } catch (e) {
-      print('❌ Error sending real FCM notification: $e');
-      throw Exception('Failed to send FCM notification: $e');
-    }
-  }
-
-  // Helper method to send notification via HTTP API
-  Future<void> _sendViaHttpAPI({
-    required String token,
-    required String title,
-    required String body,
-    required Map<String, dynamic> data,
-  }) async {
-    try {
-      final String serverKey = 'YOUR_FIREBASE_SERVER_KEY'; // You need to add this
-
-      final Map<String, dynamic> notificationPayload = {
-        'to': token,
-        'notification': {
-          'title': title,
-          'body': body,
-          'sound': 'default',
-          'badge': '1',
-        },
+      print('⚠️  FCM send failed, queuing for retry...');
+      await _firestore.collection('pending_notifications').add({
+        'token': token,
+        'title': title,
+        'body': body,
         'data': data,
-        'android': {
-          'priority': 'high',
-          'notification': {
-            'sound': 'default',
-            'channel_id': 'high_importance_channel',
-          },
-        },
-        'apns': {
-          'payload': {
-            'aps': {
-              'alert': {
-                'title': title,
-                'body': body,
-              },
-              'sound': 'default',
-              'badge': 1,
-            },
-          },
-        },
-      };
+        'createdAt': FieldValue.serverTimestamp(),
+        'delivered': false,
+        'priority': data['urgency'] == 'emergency' ? 'high' : 'normal',
+        'retryCount': 0,
+        'lastRetry': null,
+      });
 
-      final response = await http.post(
-        Uri.parse('https://fcm.googleapis.com/fcm/send'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'key=$serverKey',
-        },
-        body: jsonEncode(notificationPayload),
-      );
+      print('✅ Notification queued for retry');
 
-      if (response.statusCode == 200) {
-        print('✅ FCM HTTP API call successful');
-        final responseData = jsonDecode(response.body);
-        if (responseData['success'] == 1) {
-          print('✅ FCM notification delivered successfully');
-        } else {
-          print('❌ FCM notification delivery failed: ${responseData}');
-          throw Exception('FCM delivery failed: ${responseData}');
-        }
-      } else {
-        print('❌ FCM HTTP API error: ${response.statusCode} - ${response.body}');
-        throw Exception('HTTP ${response.statusCode}: ${response.body}');
-      }
     } catch (e) {
-      print('❌ Error in HTTP API call: $e');
-      rethrow;
+      print('❌ Error in sendNotificationWithBackup: $e');
     }
   }
 
-  Future<void> sendNotificationToMultiple({
-    required List<String> tokens,
-    required String title,
-    required String body,
-    required Map<String, dynamic> data,
-  }) async {
-    try {
-      print('🚀 SENDING REAL FCM NOTIFICATIONS TO ${tokens.length} DONORS');
-
-      int successCount = 0;
-      int failCount = 0;
-
-      // Send to each token individually
-      for (String token in tokens) {
-        if (token.isNotEmpty && token != 'null') {
-          try {
-            await sendNotification(
-              token: token,
-              title: title,
-              body: body,
-              data: data,
-            );
-            successCount++;
-
-            // Small delay to avoid rate limiting
-            await Future.delayed(Duration(milliseconds: 100));
-          } catch (e) {
-            print('❌ Failed to send to token ${token.length > 10 ? token.substring(0, 10) : token}...: $e');
-            failCount++;
-          }
-        } else {
-          print('⚠️  Skipping empty or invalid token');
-          failCount++;
-        }
-      }
-
-      print('✅ Successfully sent notifications to $successCount out of ${tokens.length} donors');
-      if (failCount > 0) {
-        print('❌ Failed to send to $failCount donors');
-      }
-    } catch (e) {
-      print('❌ Error sending notifications to multiple donors: $e');
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════
+  // 🚨 EMERGENCY NOTIFICATIONS
+  // ═══════════════════════════════════════════════════════════════
 
   Future<void> sendEmergencyNotification({
     required String token,
@@ -161,251 +179,353 @@ class FCMService {
     required int units,
     required String requestId,
   }) async {
-    try {
-      final title = '🚨 EMERGENCY: $bloodType Blood Needed Urgently!';
-      final body = 'EMERGENCY: $bloodType blood needed ${distance.toStringAsFixed(1)}km away. '
-          '$units unit(s) required immediately. Please respond ASAP!';
+    final title = '🚨 EMERGENCY: $bloodType Blood Needed!';
+    final body = 'EMERGENCY: $bloodType blood needed ${distance.toStringAsFixed(1)}km away. '
+        '$units unit(s) required immediately!';
 
-      await sendNotification(
-        token: token,
-        title: title,
-        body: body,
-        data: {
-          'type': 'emergency_blood_request',
-          'requestId': requestId,
-          'bloodType': bloodType,
-          'urgency': 'emergency',
-          'distance': distance.toStringAsFixed(1),
-          'units': units.toString(),
-          'priority': 'high',
-          'timestamp': DateTime.now().toIso8601String(),
-          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-        },
-      );
-
-      print('🚨 EMERGENCY notification sent successfully');
-    } catch (e) {
-      print('❌ Error sending emergency notification: $e');
-    }
+    await sendNotificationWithBackup(
+      token: token,
+      title: title,
+      body: body,
+      data: {
+        'type': 'emergency_blood_request',
+        'requestId': requestId,
+        'bloodType': bloodType,
+        'urgency': 'emergency',
+        'distance': distance.toStringAsFixed(1),
+        'units': units.toString(),
+        'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    );
   }
 
-  Future<void> testFCMToken(String userId) async {
+  // ═══════════════════════════════════════════════════════════════
+  // 🔄 RETRY FAILED NOTIFICATIONS
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> retryFailedNotifications() async {
     try {
-      print('🧪 TESTING FCM TOKEN FOR USER: $userId');
+      print('🔄 Checking for failed notifications...');
 
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
-      final userData = userDoc.data();
+      final fiveMinutesAgo = DateTime.now().subtract(Duration(minutes: 5));
 
-      if (userData == null) {
-        print('❌ User document not found');
+      final pendingDocs = await _firestore
+          .collection('pending_notifications')
+          .where('delivered', isEqualTo: false)
+          .where('retryCount', isLessThan: 3)
+          .limit(50)
+          .get();
+
+      if (pendingDocs.docs.isEmpty) {
+        print('✅ No pending notifications');
         return;
       }
 
-      final fcmToken = userData['fcmToken'];
-      final userName = userData['fullName'] ?? userData['name'] ?? 'Unknown';
-      final userRole = userData['role'] ?? 'Unknown';
-      final isAvailable = userData['isAvailable'] ?? false;
-      final hasLocation = userData['location'] != null;
+      print('🔄 Retrying ${pendingDocs.docs.length} notifications');
 
-      print('👤 User Details:');
-      print('   Name: $userName');
-      print('   Role: $userRole');
-      print('   Available: $isAvailable');
-      print('   Has Location: $hasLocation');
-      print('   FCM Token: ${fcmToken != null ? '${fcmToken.toString().substring(0, min(30, fcmToken.toString().length))}...' : 'MISSING ❌'}');
+      int successCount = 0;
+      int failCount = 0;
 
-      if (fcmToken == null) {
-        print('❌ CRITICAL: No FCM token found for donor $userName');
+      for (var doc in pendingDocs.docs) {
+        final data = doc.data();
 
-        String? currentToken = await _firebaseMessaging.getToken();
-        if (currentToken != null) {
-          print('💡 Current device FCM token: ${currentToken.substring(0, min(30, currentToken.length))}...');
-          print('💡 Saving this token to user document...');
-          await saveFCMTokenToUser(userId);
+        final lastRetry = (data['lastRetry'] as Timestamp?)?.toDate();
+        if (lastRetry != null && lastRetry.isAfter(fiveMinutesAgo)) {
+          continue;
         }
-      } else {
-        print('✅ FCM token found and ready for notifications');
 
-        await sendTestNotification(
-          donorId: userId,
-          bloodType: userData['bloodType'] ?? 'O+',
-          distance: 2.5,
-          urgency: 'test',
+        final success = await sendNotification(
+          token: data['token'],
+          title: data['title'],
+          body: data['body'],
+          data: Map<String, dynamic>.from(data['data'] ?? {}),
         );
+
+        if (success) {
+          await doc.reference.update({
+            'delivered': true,
+            'deliveredAt': FieldValue.serverTimestamp(),
+          });
+          successCount++;
+        } else {
+          await doc.reference.update({
+            'retryCount': FieldValue.increment(1),
+            'lastRetry': FieldValue.serverTimestamp(),
+          });
+          failCount++;
+        }
+
+        await Future.delayed(Duration(milliseconds: 100));
       }
 
+      print('✅ Retry complete: $successCount delivered, $failCount pending');
+
     } catch (e) {
-      print('❌ Error testing FCM token: $e');
+      print('❌ Error retrying: $e');
     }
   }
 
-  int min(int a, int b) => a < b ? a : b;
-
-  Future<void> sendTestNotification({
-    required String donorId,
-    required String bloodType,
-    required double distance,
-    String urgency = 'normal',
-  }) async {
-    try {
-      print('🧪 SENDING REAL TEST NOTIFICATION TO DONOR: $donorId');
-
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(donorId).get();
-      final userData = userDoc.data();
-
-      if (userData == null || userData['fcmToken'] == null) {
-        print('❌ Cannot send test notification: No FCM token found for donor $donorId');
-        return;
-      }
-
-      final fcmToken = userData['fcmToken'];
-      final donorName = userData['fullName'] ?? userData['name'] ?? 'Test Donor';
-
-      await sendNotification(
-        token: fcmToken,
-        title: '🧪 TEST: Blood Request',
-        body: 'TEST: $bloodType blood needed ${distance.toStringAsFixed(1)}km away. 1 unit required.',
-        data: {
-          'type': 'test_notification',
-          'requestId': 'test-request-${DateTime.now().millisecondsSinceEpoch}',
-          'bloodType': bloodType,
-          'urgency': urgency,
-          'distance': distance.toStringAsFixed(1),
-          'donorId': donorId,
-          'isTest': 'true',
-          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-        },
-      );
-
-      print('✅ REAL test notification sent to $donorName');
-
-    } catch (e) {
-      print('❌ Error sending test notification: $e');
-    }
+  void startRetryWorker() {
+    print('🤖 Starting retry worker...');
+    Stream.periodic(Duration(minutes: 5)).listen((_) {
+      retryFailedNotifications();
+    });
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 📱 TOKEN MANAGEMENT - PERMANENT SOLUTION
+  // ═══════════════════════════════════════════════════════════════
 
   Future<String?> getCurrentDeviceToken() async {
     try {
       String? token = await _firebaseMessaging.getToken();
-      print('📱 Current device FCM token: ${token != null ? '${token.substring(0, min(30, token.length))}...' : 'null'}');
+      if (kDebugMode && token != null) {
+        print('📱 Current FCM token: ${token.substring(0, 30)}...');
+      }
       return token;
     } catch (e) {
-      print('❌ Error getting device FCM token: $e');
+      print('❌ Error getting token: $e');
       return null;
     }
   }
 
+  /// 🔥 PERMANENT SOLUTION: Force refresh and save token
+  /// Call this on EVERY app start and login
   Future<void> saveFCMTokenToUser(String userId) async {
     try {
-      String? token = await getCurrentDeviceToken();
+      // 🔥 FORCE DELETE old token and get fresh one
+      // This ensures we always have the latest token even after reinstall
+      await _firebaseMessaging.deleteToken();
+      
+      // Small delay to ensure token is deleted
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Get fresh token
+      String? token = await _firebaseMessaging.getToken();
+      
       if (token != null) {
-        await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        await _firestore.collection('users').doc(userId).update({
+          'fcmToken': token,
+          'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+          'fcmTokenDeviceId': await _getDeviceId(),
+        });
+        print('✅ FCM token saved for user: $userId');
+        print('   Token: ${token.substring(0, 30)}...');
+      }
+    } catch (e) {
+      print('❌ Error saving token: $e');
+      // Fallback: try without delete
+      await _saveFCMTokenFallback(userId);
+    }
+  }
+
+  /// Fallback method if deleteToken fails
+  Future<void> _saveFCMTokenFallback(String userId) async {
+    try {
+      String? token = await _firebaseMessaging.getToken();
+      if (token != null) {
+        await _firestore.collection('users').doc(userId).update({
           'fcmToken': token,
           'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
         });
-        print('✅ FCM token saved for user: $userId');
-      } else {
-        print('❌ No FCM token available to save');
+        print('✅ FCM token saved (fallback) for user: $userId');
       }
     } catch (e) {
-      print('❌ Error saving FCM token: $e');
+      print('❌ Error in fallback token save: $e');
     }
   }
 
-  Future<void> checkFCMHealth() async {
+  /// Get a unique device identifier
+  Future<String> _getDeviceId() async {
     try {
-      print('🏥 CHECKING FCM SERVICE HEALTH...');
-
-      final apnsToken = await _firebaseMessaging.getAPNSToken();
+      // Use a combination of factors for device ID
       final token = await _firebaseMessaging.getToken();
-
-      print('   Firebase Messaging Status: ✅ ACTIVE');
-      print('   APNS Token: ${apnsToken != null ? "Available" : "Not available"}');
-      print('   FCM Token: ${token != null ? "Available" : "Not available"}');
-
-      print('✅ FCM Service Health: EXCELLENT');
+      if (token != null && token.length > 20) {
+        return token.substring(0, 20); // Use first 20 chars of token as device ID
+      }
+      return DateTime.now().millisecondsSinceEpoch.toString();
     } catch (e) {
-      print('❌ FCM Service Health Check Failed: $e');
+      return DateTime.now().millisecondsSinceEpoch.toString();
     }
   }
+
+  /// 🔥 Clear FCM token on logout (important!)
+  Future<void> clearFCMToken(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'fcmToken': FieldValue.delete(),
+        'fcmTokenUpdatedAt': FieldValue.delete(),
+      });
+      await _firebaseMessaging.deleteToken();
+      print('✅ FCM token cleared for user: $userId');
+    } catch (e) {
+      print('❌ Error clearing token: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🔧 INITIALIZATION - ROBUST VERSION
+  // ═══════════════════════════════════════════════════════════════
+
+  bool _isInitialized = false;
 
   Future<void> initializeFCM() async {
+    // Prevent double initialization
+    if (_isInitialized) {
+      print('⚠️ FCM already initialized, skipping...');
+      return;
+    }
+
     try {
-      print('🔄 INITIALIZING FCM SERVICE...');
+      print('🔄 INITIALIZING FCM...');
 
       NotificationSettings settings = await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
         provisional: false,
+        criticalAlert: true,
       );
 
       print('✅ Notification permission: ${settings.authorizationStatus}');
 
-      String? token = await getCurrentDeviceToken();
-      if (token != null) {
-        print('✅ FCM token obtained: ${token.substring(0, min(20, token.length))}...');
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        print('⚠️ Notifications not authorized, some features may not work');
+      }
 
-        // Save token to current user if logged in
-        // You'll need to implement this based on your auth system
-        // await saveFCMTokenToUser(currentUserId);
-      } else {
-        print('❌ Failed to get FCM token');
+      // 🔥 CRITICAL: Force refresh token on every app start
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        await saveFCMTokenToUser(currentUser.uid);
+        print('✅ Token force-refreshed for logged-in user: ${currentUser.uid}');
       }
 
       // Handle foreground messages
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('📱 Foreground FCM message received:');
+        print('📱 Foreground notification:');
         print('   Title: ${message.notification?.title}');
         print('   Body: ${message.notification?.body}');
-        print('   Data: ${message.data}');
-
-        // You can show a local notification here
-        _showLocalNotification(message);
+        
+        // You can show a local notification or snackbar here
+        _handleForegroundMessage(message);
       });
 
-      // Handle when app is opened from terminated state
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        print('👆 FCM message opened from terminated state:');
-        print('   Data: ${message.data}');
-        _handleNotificationClick(message.data);
+      // Handle background taps
+      FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        print('👆 Notification tapped (background)');
+        _handleNotificationTap(message);
       });
 
-      // Handle initial notification when app is opened from terminated state
+      // Handle terminated state taps
       RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
       if (initialMessage != null) {
-        print('👆 Initial FCM message: ${initialMessage.data}');
-        _handleNotificationClick(initialMessage.data);
+        print('👆 App opened from notification (terminated)');
+        _handleNotificationTap(initialMessage);
       }
 
-      print('✅ FCM Service Initialized Successfully');
+      // 🔥 AUTO-REFRESH TOKEN WHEN IT CHANGES (CRITICAL FOR REINSTALLS)
+      _firebaseMessaging.onTokenRefresh.listen((newToken) async {
+        print('🔄 FCM token auto-refreshed: ${newToken.substring(0, 30)}...');
+
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            await _firestore.collection('users').doc(user.uid).update({
+              'fcmToken': newToken,
+              'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+            });
+            print('✅ New token auto-saved to Firestore');
+          } catch (e) {
+            print('❌ Error auto-saving refreshed token: $e');
+          }
+        }
+      });
+
+      startRetryWorker();
+      _isInitialized = true;
+
+      print('✅ FCM initialized successfully');
     } catch (e) {
-      print('❌ FCM Service Initialization Failed: $e');
+      print('❌ FCM init failed: $e');
     }
   }
 
-  void _showLocalNotification(RemoteMessage message) {
-    // You can use flutter_local_notifications package here
-    // to show a local notification when app is in foreground
-    print('🎯 Should show local notification: ${message.notification?.title}');
+  /// Handle foreground message (show in-app notification)
+  void _handleForegroundMessage(RemoteMessage message) {
+    // This is handled by DevInboxListener now
+    // But you can add additional logic here if needed
+    print('📥 Foreground message received: ${message.data}');
   }
 
-  void _handleNotificationClick(Map<String, dynamic> data) {
-    print('🎯 Handling notification click with data: $data');
-
-    // Handle navigation based on notification type
+  /// Handle notification tap (navigate to relevant screen)
+  void _handleNotificationTap(RemoteMessage message) {
+    final data = message.data;
     final type = data['type'];
-    switch (type) {
-      case 'emergency_blood_request':
-      case 'blood_request':
-        final requestId = data['requestId'];
-        print('🔗 Navigate to request details: $requestId');
-        break;
-      case 'test_notification':
-        print('🔗 Test notification clicked');
-        break;
-      default:
-        print('🔗 Unknown notification type: $type');
+    final requestId = data['requestId'];
+    
+    print('🔔 Notification tap data: type=$type, requestId=$requestId');
+    
+    // Navigation logic can be added here
+    // You would need to use a global navigator key or context
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🧪 TESTING
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> sendTestNotification({required String userId}) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final fcmToken = userDoc.data()?['fcmToken'];
+
+      if (fcmToken == null) {
+        print('❌ No FCM token');
+        return;
+      }
+
+      await sendNotification(
+        token: fcmToken,
+        title: '🧪 TEST: Notifications Working!',
+        body: 'Your notifications are working perfectly!',
+        data: {
+          'type': 'test',
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+      );
+
+    } catch (e) {
+      print('❌ Test failed: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🧹 CLEANUP
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> cleanupOldNotifications() async {
+    try {
+      final oneDayAgo = DateTime.now().subtract(Duration(days: 1));
+
+      final oldDocs = await _firestore
+          .collection('pending_notifications')
+          .where('delivered', isEqualTo: true)
+          .where('createdAt', isLessThan: Timestamp.fromDate(oneDayAgo))
+          .limit(500)
+          .get();
+
+      if (oldDocs.docs.isEmpty) return;
+
+      final batch = _firestore.batch();
+      for (var doc in oldDocs.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      print('✅ Cleaned ${oldDocs.docs.length} old notifications');
+    } catch (e) {
+      print('❌ Cleanup error: $e');
     }
   }
 }
