@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../services/fcm_service.dart';
+import '../../../services/fulfillment_service.dart';
+import '../../../repositories/chat_repository.dart';
 import '../../../core/notification/dev_inbox_listener.dart';
 import '../../../core/theme.dart';
+import '../../chat/chat_screen.dart';
 
 class HospitalDashboardScreen extends StatefulWidget {
   const HospitalDashboardScreen({Key? key}) : super(key: key);
@@ -112,6 +115,41 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: BloodAppTheme.error),
+            const SizedBox(width: 12),
+            const Text('Logout'),
+          ],
+        ),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.error),
+            child: const Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/select_role', (route) => false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -177,6 +215,18 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
                         ).then((_) => fetchProfileStatus());
                       },
                     ),
+                    IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.logout, color: Colors.white, size: 22),
+                      ),
+                      onPressed: _logout,
+                      tooltip: 'Logout',
+                    ),
                     const SizedBox(width: 8),
                   ],
                 ),
@@ -190,6 +240,12 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
                         // Stats Section
                         const SizedBox(height: 16),
                         _buildStatsSection(),
+
+                        // Accepted Requests - Ready to Complete
+                        if (_acceptedRequestsCount > 0) ...[
+                          const SizedBox(height: 20),
+                          _buildAcceptedRequestsSection(),
+                        ],
 
                         // Quick Actions
                         const SizedBox(height: 24),
@@ -510,6 +566,367 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
     );
   }
 
+  Widget _buildAcceptedRequestsSection() {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.success.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.check_circle, color: BloodAppTheme.success, size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Ready to Complete',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: BloodAppTheme.textPrimary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('blood_requests')
+              .where('requesterId', isEqualTo: userId)
+              .where('status', isEqualTo: 'accepted')
+              .orderBy('acceptedAt', descending: true)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return const SizedBox.shrink();
+            }
+
+            return Column(
+              children: snapshot.data!.docs.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return _buildAcceptedRequestCard(doc.id, data);
+              }).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAcceptedRequestCard(String requestId, Map<String, dynamic> data) {
+    final bloodType = data['bloodType'] as String? ?? 'Unknown';
+    final units = (data['units'] as num?)?.toInt() ?? 1;
+    final acceptedByName = data['acceptedBloodBankName'] as String? ?? 
+                           data['acceptedByName'] as String? ?? 
+                           'Blood Bank';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [BloodAppTheme.success, BloodAppTheme.success.withOpacity(0.8)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: BloodAppTheme.success.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.water_drop,
+                        color: BloodAppTheme.getBloodTypeColor(bloodType),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        bloodType,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: BloodAppTheme.getBloodTypeColor(bloodType),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$units unit${units > 1 ? 's' : ''}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check, color: Colors.white, size: 14),
+                      SizedBox(width: 4),
+                      Text(
+                        'ACCEPTED',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(
+                  Icons.local_hospital,
+                  color: Colors.white.withOpacity(0.9),
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Accepted by: $acceptedByName',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.95),
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openChat(requestId, data),
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: const Text('Chat'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _completeDonation(requestId, data),
+                    icon: const Icon(Icons.check_circle, size: 18),
+                    label: const Text('Complete Donation'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: BloodAppTheme.success,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openChat(String requestId, Map<String, dynamic> data) {
+    final acceptedByName = data['acceptedBloodBankName'] as String? ?? 
+                           data['acceptedByName'] as String? ?? 
+                           'Blood Bank';
+    final bloodType = data['bloodType'] as String? ?? '';
+    final units = (data['units'] as num?)?.toInt() ?? 1;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          threadId: requestId,
+          title: acceptedByName,
+          subtitle: '$bloodType Blood Request - $units unit(s)',
+          otherUserName: acceptedByName,
+          otherUserId: data['acceptedBy'] as String?,
+          bloodType: bloodType,
+          units: units,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _completeDonation(String requestId, Map<String, dynamic> data) async {
+    final bloodType = data['bloodType'] as String? ?? '';
+    final units = (data['units'] as num?)?.toInt() ?? 1;
+    final acceptedByName = data['acceptedBloodBankName'] as String? ?? 
+                           data['acceptedByName'] as String? ?? 
+                           'Blood Bank';
+    final acceptedBy = data['acceptedBy'] as String?;
+    final hospitalName = hospitalData?['hospitalName'] as String? ?? 'Hospital';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.success.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle, color: BloodAppTheme.success),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Complete Donation?')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Blood Type: $bloodType'),
+            Text('Units: $units'),
+            Text('Provided by: $acceptedByName'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.info.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: BloodAppTheme.info, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This will mark the donation as complete and notify the blood bank to deduct inventory.',
+                      style: TextStyle(fontSize: 12, color: BloodAppTheme.info),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.success),
+            child: const Text('Complete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Update blood request status
+      await FirebaseFirestore.instance
+          .collection('blood_requests')
+          .doc(requestId)
+          .update({
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Mark chat thread as completed
+      await ChatRepository().markThreadAsCompleted(requestId);
+
+      // Send inventory deduction notification to blood bank
+      if (acceptedBy != null) {
+        await FulfillmentService.instance.requestInventoryDeductionConfirmation(
+          requestId: requestId,
+          bloodBankId: acceptedBy,
+          bloodType: bloodType,
+          units: units,
+          requesterName: hospitalName,
+        );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text('Donation completed successfully! 🎉'),
+              ],
+            ),
+            backgroundColor: BloodAppTheme.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: BloodAppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildQuickActionsHeader() {
     return const Text(
       'Quick Actions',
@@ -555,6 +972,20 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
             enabled: profileCompleted == true,
             onTap: () => Navigator.pushNamed(context, '/hospital/my_requests'),
             badge: _activeRequestsCount + _acceptedRequestsCount,
+          ),
+          Divider(
+            height: 1,
+            indent: 70,
+            endIndent: 16,
+            color: Colors.grey.shade200,
+          ),
+          _buildQuickActionTile(
+            icon: Icons.chat_bubble_outline,
+            title: 'Messages',
+            subtitle: 'Chat with blood banks',
+            iconColor: BloodAppTheme.success,
+            enabled: profileCompleted == true,
+            onTap: () => Navigator.pushNamed(context, '/chats'),
           ),
           Divider(
             height: 1,

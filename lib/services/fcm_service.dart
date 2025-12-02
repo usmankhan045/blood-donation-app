@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:googleapis_auth/auth_io.dart' as auth;
+import 'navigation_service.dart';
 
 /// 🔥 PRODUCTION-READY FCM SERVICE WITH ACTUAL DELIVERY
 /// Sends notifications directly via FCM HTTP v1 API
@@ -28,17 +29,24 @@ class FCMService {
     try {
       if (_cachedAccessToken != null &&
           _tokenExpiry != null &&
-          DateTime.now().isBefore(_tokenExpiry!.subtract(Duration(minutes: 5)))) {
+          DateTime.now().isBefore(
+            _tokenExpiry!.subtract(Duration(minutes: 5)),
+          )) {
         return _cachedAccessToken!;
       }
 
-      final serviceAccountJson = await rootBundle.loadString('lib/assets/service_account.json');
+      final serviceAccountJson = await rootBundle.loadString(
+        'lib/assets/service_account.json',
+      );
       final accountCredentials = auth.ServiceAccountCredentials.fromJson(
         json.decode(serviceAccountJson),
       );
 
       final scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
-      final authClient = await auth.clientViaServiceAccount(accountCredentials, scopes);
+      final authClient = await auth.clientViaServiceAccount(
+        accountCredentials,
+        scopes,
+      );
 
       final accessToken = authClient.credentials.accessToken.data;
       _cachedAccessToken = accessToken;
@@ -48,7 +56,6 @@ class FCMService {
 
       print('✅ OAuth2 access token obtained (expires: $_tokenExpiry)');
       return accessToken;
-
     } catch (e) {
       print('❌ Error getting access token: $e');
       rethrow;
@@ -71,11 +78,14 @@ class FCMService {
       print('   Title: $title');
 
       final accessToken = await _getAccessToken();
-      final serviceAccountJson = await rootBundle.loadString('lib/assets/service_account.json');
+      final serviceAccountJson = await rootBundle.loadString(
+        'lib/assets/service_account.json',
+      );
       final serviceAccount = json.decode(serviceAccountJson);
       final projectId = serviceAccount['project_id'];
 
-      final url = 'https://fcm.googleapis.com/v1/projects/$projectId/messages:send';
+      final url =
+          'https://fcm.googleapis.com/v1/projects/$projectId/messages:send';
 
       final response = await http.post(
         Uri.parse(url),
@@ -86,10 +96,7 @@ class FCMService {
         body: json.encode({
           'message': {
             'token': token,
-            'notification': {
-              'title': title,
-              'body': body,
-            },
+            'notification': {'title': title, 'body': body},
             'data': data.map((key, value) => MapEntry(key, value.toString())),
             'android': {
               'priority': data['urgency'] == 'emergency' ? 'high' : 'normal',
@@ -100,10 +107,7 @@ class FCMService {
             },
             'apns': {
               'payload': {
-                'aps': {
-                  'sound': 'default',
-                  'badge': 1,
-                },
+                'aps': {'sound': 'default', 'badge': 1},
               },
             },
           },
@@ -118,7 +122,6 @@ class FCMService {
         print('   Response: ${response.body}');
         return false;
       }
-
     } catch (e) {
       print('❌ Error sending FCM notification: $e');
       return false;
@@ -162,7 +165,6 @@ class FCMService {
       });
 
       print('✅ Notification queued for retry');
-
     } catch (e) {
       print('❌ Error in sendNotificationWithBackup: $e');
     }
@@ -180,7 +182,8 @@ class FCMService {
     required String requestId,
   }) async {
     final title = '🚨 EMERGENCY: $bloodType Blood Needed!';
-    final body = 'EMERGENCY: $bloodType blood needed ${distance.toStringAsFixed(1)}km away. '
+    final body =
+        'EMERGENCY: $bloodType blood needed ${distance.toStringAsFixed(1)}km away. '
         '$units unit(s) required immediately!';
 
     await sendNotificationWithBackup(
@@ -210,12 +213,13 @@ class FCMService {
 
       final fiveMinutesAgo = DateTime.now().subtract(Duration(minutes: 5));
 
-      final pendingDocs = await _firestore
-          .collection('pending_notifications')
-          .where('delivered', isEqualTo: false)
-          .where('retryCount', isLessThan: 3)
-          .limit(50)
-          .get();
+      final pendingDocs =
+          await _firestore
+              .collection('pending_notifications')
+              .where('delivered', isEqualTo: false)
+              .where('retryCount', isLessThan: 3)
+              .limit(50)
+              .get();
 
       if (pendingDocs.docs.isEmpty) {
         print('✅ No pending notifications');
@@ -260,7 +264,6 @@ class FCMService {
       }
 
       print('✅ Retry complete: $successCount delivered, $failCount pending');
-
     } catch (e) {
       print('❌ Error retrying: $e');
     }
@@ -297,13 +300,13 @@ class FCMService {
       // 🔥 FORCE DELETE old token and get fresh one
       // This ensures we always have the latest token even after reinstall
       await _firebaseMessaging.deleteToken();
-      
+
       // Small delay to ensure token is deleted
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
       // Get fresh token
       String? token = await _firebaseMessaging.getToken();
-      
+
       if (token != null) {
         await _firestore.collection('users').doc(userId).update({
           'fcmToken': token,
@@ -342,7 +345,10 @@ class FCMService {
       // Use a combination of factors for device ID
       final token = await _firebaseMessaging.getToken();
       if (token != null && token.length > 20) {
-        return token.substring(0, 20); // Use first 20 chars of token as device ID
+        return token.substring(
+          0,
+          20,
+        ); // Use first 20 chars of token as device ID
       }
       return DateTime.now().millisecondsSinceEpoch.toString();
     } catch (e) {
@@ -380,13 +386,14 @@ class FCMService {
     try {
       print('🔄 INITIALIZING FCM...');
 
-      NotificationSettings settings = await _firebaseMessaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-        criticalAlert: true,
-      );
+      NotificationSettings settings = await _firebaseMessaging
+          .requestPermission(
+            alert: true,
+            badge: true,
+            sound: true,
+            provisional: false,
+            criticalAlert: true,
+          );
 
       print('✅ Notification permission: ${settings.authorizationStatus}');
 
@@ -407,7 +414,7 @@ class FCMService {
         print('📱 Foreground notification:');
         print('   Title: ${message.notification?.title}');
         print('   Body: ${message.notification?.body}');
-        
+
         // You can show a local notification or snackbar here
         _handleForegroundMessage(message);
       });
@@ -419,7 +426,8 @@ class FCMService {
       });
 
       // Handle terminated state taps
-      RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
+      RemoteMessage? initialMessage =
+          await _firebaseMessaging.getInitialMessage();
       if (initialMessage != null) {
         print('👆 App opened from notification (terminated)');
         _handleNotificationTap(initialMessage);
@@ -462,13 +470,237 @@ class FCMService {
   /// Handle notification tap (navigate to relevant screen)
   void _handleNotificationTap(RemoteMessage message) {
     final data = message.data;
-    final type = data['type'];
-    final requestId = data['requestId'];
-    
-    print('🔔 Notification tap data: type=$type, requestId=$requestId');
-    
-    // Navigation logic can be added here
-    // You would need to use a global navigator key or context
+    final type = data['type'] as String?;
+    final requestId = data['requestId'] as String?;
+    final targetType = data['targetType'] as String?;
+    final threadId = data['threadId'] as String?;
+    final senderName = data['senderName'] as String?;
+    final bloodType = data['bloodType'] as String?;
+
+    print(
+      '🔔 Notification tap data: type=$type, requestId=$requestId, targetType=$targetType, threadId=$threadId',
+    );
+
+    // Wait a bit for the app to be ready
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (type == 'blood_request' || type == 'emergency_blood_request') {
+        // Navigate based on who the notification was for
+        if (targetType == 'donor') {
+          _navigateTo('/donor_requests');
+        } else if (targetType == 'blood_bank') {
+          _navigateTo('/blood_bank_dashboard');
+        } else if (targetType == 'hospital') {
+          _navigateTo('/hospital/my_requests');
+        } else if (targetType == 'recipient') {
+          _navigateTo('/recipient/my_requests');
+        } else {
+          // Default: try to determine from current user
+          _navigateBasedOnUserRole();
+        }
+      } else if (type == 'account_approved' || type == 'account_rejected') {
+        // Navigate to login screen
+        _navigateTo('/select_role');
+      } else if (type == 'chat_message') {
+        // Navigate to specific chat
+        if (threadId != null && threadId.isNotEmpty) {
+          _navigateToChatScreen(threadId, senderName, bloodType);
+        } else {
+          _navigateTo('/chats');
+        }
+      } else if (type == 'fulfillment_reminder') {
+        _navigateTo('/blood_bank_dashboard');
+      } else if (type == 'request_accepted') {
+        // Navigate based on who the notification was for
+        if (targetType == 'recipient') {
+          _navigateTo('/recipient/my_requests');
+        } else if (targetType == 'hospital') {
+          _navigateTo('/hospital/my_requests');
+        } else {
+          _navigateBasedOnUserRole();
+        }
+      } else {
+        // Default navigation based on user role
+        _navigateBasedOnUserRole();
+      }
+    });
+  }
+
+  /// Navigate to specific chat screen
+  void _navigateToChatScreen(
+    String threadId,
+    String? senderName,
+    String? bloodType,
+  ) async {
+    try {
+      final navigator = NavigationService.instance.navigator;
+      if (navigator == null) {
+        print('⚠️ Navigator not ready for chat navigation');
+        _pendingNavigation = '/chats';
+        return;
+      }
+
+      // Get additional info from thread if needed
+      String title = senderName ?? 'Chat';
+      String subtitle =
+          bloodType != null ? '$bloodType Blood Request' : 'Blood Request';
+      String? otherUserId;
+
+      try {
+        final threadDoc =
+            await _firestore.collection('chat_threads').doc(threadId).get();
+        if (threadDoc.exists) {
+          final data = threadDoc.data()!;
+          final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+          final participants = List<String>.from(data['participants'] ?? []);
+
+          // Get the other user's ID
+          otherUserId = participants.firstWhere(
+            (id) => id != currentUserId,
+            orElse: () => '',
+          );
+
+          // Get names
+          if (otherUserId.isNotEmpty) {
+            final otherUserDoc =
+                await _firestore.collection('users').doc(otherUserId).get();
+            if (otherUserDoc.exists) {
+              title =
+                  otherUserDoc.data()?['fullName'] ??
+                  otherUserDoc.data()?['hospitalName'] ??
+                  otherUserDoc.data()?['bloodBankName'] ??
+                  senderName ??
+                  'User';
+            }
+          }
+
+          final bt = data['bloodType'] as String?;
+          final units = data['units'];
+          if (bt != null) {
+            subtitle =
+                '$bt Blood Request${units != null ? ' - $units unit(s)' : ''}';
+          }
+        }
+      } catch (e) {
+        print('⚠️ Could not fetch thread details: $e');
+      }
+
+      // Import and navigate to ChatScreen
+      // Using pushNamed with arguments
+      navigator.pushNamed('/chats');
+
+      // Then navigate to specific chat after a short delay
+      Future.delayed(const Duration(milliseconds: 300), () {
+        try {
+          // Navigate using dynamic import approach
+          _openChatDirectly(threadId, title, subtitle, otherUserId);
+        } catch (e) {
+          print('⚠️ Could not open specific chat: $e');
+        }
+      });
+
+      print('✅ Navigated to chat: $threadId');
+    } catch (e) {
+      print('❌ Error navigating to chat: $e');
+      _navigateTo('/chats');
+    }
+  }
+
+  /// Open chat directly using navigator
+  void _openChatDirectly(
+    String threadId,
+    String title,
+    String subtitle,
+    String? otherUserId,
+  ) {
+    try {
+      final navigator = NavigationService.instance.navigator;
+      if (navigator == null) return;
+
+      // We need to push the ChatScreen widget directly
+      // This requires importing ChatScreen, but to avoid circular imports,
+      // we'll use a callback approach
+      if (_chatNavigationCallback != null) {
+        _chatNavigationCallback!(threadId, title, subtitle, otherUserId);
+      }
+    } catch (e) {
+      print('❌ Error opening chat directly: $e');
+    }
+  }
+
+  // Callback for chat navigation (set from main.dart or chat_list_screen)
+  static Function(
+    String threadId,
+    String title,
+    String subtitle,
+    String? otherUserId,
+  )?
+  _chatNavigationCallback;
+
+  static void setChatNavigationCallback(
+    Function(String, String, String, String?) callback,
+  ) {
+    _chatNavigationCallback = callback;
+  }
+
+  /// Navigate to a specific route using the global navigator
+  void _navigateTo(String route) {
+    try {
+      final navigator = NavigationService.instance.navigator;
+      if (navigator != null) {
+        navigator.pushNamed(route);
+        print('✅ Navigated to: $route');
+      } else {
+        print('⚠️ Navigator not ready, queuing navigation to: $route');
+        // Queue for later navigation
+        _pendingNavigation = route;
+      }
+    } catch (e) {
+      print('❌ Navigation error: $e');
+    }
+  }
+
+  String? _pendingNavigation;
+
+  /// Check and execute pending navigation
+  void checkPendingNavigation() {
+    if (_pendingNavigation != null) {
+      final route = _pendingNavigation!;
+      _pendingNavigation = null;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _navigateTo(route);
+      });
+    }
+  }
+
+  /// Navigate based on current user role
+  void _navigateBasedOnUserRole() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final role = userDoc.data()?['role'] as String?;
+
+      switch (role) {
+        case 'donor':
+          _navigateTo('/donor_requests');
+          break;
+        case 'recipient':
+          _navigateTo('/recipient/my_requests');
+          break;
+        case 'blood_bank':
+          _navigateTo('/blood_bank_dashboard');
+          break;
+        case 'hospital':
+          _navigateTo('/hospital/my_requests');
+          break;
+        case 'admin':
+          _navigateTo('/admin_dashboard');
+          break;
+      }
+    } catch (e) {
+      print('❌ Error navigating by role: $e');
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -489,12 +721,8 @@ class FCMService {
         token: fcmToken,
         title: '🧪 TEST: Notifications Working!',
         body: 'Your notifications are working perfectly!',
-        data: {
-          'type': 'test',
-          'timestamp': DateTime.now().toIso8601String(),
-        },
+        data: {'type': 'test', 'timestamp': DateTime.now().toIso8601String()},
       );
-
     } catch (e) {
       print('❌ Test failed: $e');
     }
@@ -508,12 +736,13 @@ class FCMService {
     try {
       final oneDayAgo = DateTime.now().subtract(Duration(days: 1));
 
-      final oldDocs = await _firestore
-          .collection('pending_notifications')
-          .where('delivered', isEqualTo: true)
-          .where('createdAt', isLessThan: Timestamp.fromDate(oneDayAgo))
-          .limit(500)
-          .get();
+      final oldDocs =
+          await _firestore
+              .collection('pending_notifications')
+              .where('delivered', isEqualTo: true)
+              .where('createdAt', isLessThan: Timestamp.fromDate(oneDayAgo))
+              .limit(500)
+              .get();
 
       if (oldDocs.docs.isEmpty) return;
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../../services/auth_service.dart';
 
 class HospitalSignUpScreen extends StatefulWidget {
   const HospitalSignUpScreen({Key? key}) : super(key: key);
@@ -14,6 +15,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _authService = AuthService();
   bool _showPass = false;
   bool _loading = false;
   String? _error;
@@ -25,52 +27,29 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
     });
 
     try {
-      UserCredential cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passCtrl.text.trim(),
+      final error = await _authService.signUpHospital(
+        _emailCtrl.text.trim(),
+        _passCtrl.text.trim(),
       );
-      await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
-        'email': _emailCtrl.text.trim(),
-        'role': 'hospital',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
 
-      // Send verification email
-      await cred.user!.sendEmailVerification();
+      if (error != null) {
+        setState(() {
+          _error = error;
+          _loading = false;
+        });
+        return;
+      }
 
       setState(() => _loading = false);
 
-      // Show verification dialog
       if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: Text('Verify Your Email'),
-            content: Text(
-                'A verification link has been sent to your email. Please verify your email before logging in.'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.pushReplacementNamed(context, '/hospital_login');
-                },
-                child: Text('OK'),
-              ),
-            ],
-          ),
-        );
+        Navigator.pushReplacementNamed(context, '/hospital_dashboard');
       }
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = e.message;
-      });
     } catch (e) {
       setState(() {
-        _error = 'Sign up failed. Please try again.';
+        _error = 'Sign up failed: $e';
+        _loading = false;
       });
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -101,17 +80,22 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
       final userSnapshot = await userDoc.get();
 
       if (!userSnapshot.exists) {
+        // Create new hospital user
         await userDoc.set({
           'email': userCred.user!.email,
           'role': 'hospital',
           'createdAt': FieldValue.serverTimestamp(),
         });
-      } else if (userSnapshot['role'] != 'hospital') {
-        setState(() {
-          _error = 'This Google account is already registered as a different role.';
-        });
-        await FirebaseAuth.instance.signOut();
-        return;
+      } else {
+        // Existing user - check role
+        final userData = userSnapshot.data()!;
+        if (userData['role'] != 'hospital') {
+          setState(() {
+            _error = 'This Google account is already registered as a different role.';
+          });
+          await FirebaseAuth.instance.signOut();
+          return;
+        }
       }
 
       if (mounted) {
@@ -132,16 +116,13 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Very light, soft accent for hospital
     const background = Color(0xFFF6F9FB);
     const card = Color(0xFFFFFFFF);
     const inputBorder = Color(0xFFE0E7EF);
     const text = Color(0xFF3A4958);
-
-    // Teal/green accent for buttons/links
-    const button = Color(0xFF67D5B5); // Soft teal green
+    const button = Color(0xFF67D5B5);
     const buttonText = Colors.white;
-    const loginLink = Color(0xFF179C52); // Rich green for login link
+    const loginLink = Color(0xFF179C52);
 
     return Scaffold(
       backgroundColor: background,
@@ -157,7 +138,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Sign Up as Hospital',
                 style: TextStyle(
                   fontSize: 28,
@@ -171,8 +152,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                 'Manage blood requests and donor coordination.',
                 style: TextStyle(fontSize: 16, color: text.withOpacity(0.65)),
               ),
-              const SizedBox(height: 32),
-
+              const SizedBox(height: 24),
               // Email field
               Container(
                 decoration: BoxDecoration(
@@ -192,7 +172,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                   decoration: InputDecoration(
                     hintText: 'Email',
                     hintStyle: TextStyle(color: text.withOpacity(0.4)),
-                    prefixIcon: Icon(Icons.email_outlined, color: text.withOpacity(0.65)), // hospital icon
+                    prefixIcon: Icon(Icons.email_outlined, color: text.withOpacity(0.65)),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(vertical: 18),
                   ),
@@ -204,7 +184,6 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-
               // Password field
               Container(
                 decoration: BoxDecoration(
@@ -248,8 +227,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-
-              // Sign up button (TEAL/GREEN)
+              // Sign up button
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -263,21 +241,21 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                   onPressed: _loading
                       ? null
                       : () {
-                    if (_formKey.currentState!.validate()) {
-                      _signUpHospital();
-                    }
-                  },
+                          if (_formKey.currentState!.validate()) {
+                            _signUpHospital();
+                          }
+                        },
                   child: _loading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
-                    'Create Account',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                      color: buttonText,
-                    ),
-                  ),
+                          'Create Account',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                            color: buttonText,
+                          ),
+                        ),
                 ),
               ),
               if (_error != null) ...[
@@ -289,7 +267,6 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-
               // Or divider
               Row(
                 children: [
@@ -302,7 +279,6 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-
               // Google signup
               SizedBox(
                 width: double.infinity,
@@ -312,9 +288,9 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                     'assets/images/google_logo.png',
                     width: 24,
                     height: 24,
-                    errorBuilder: (_, __, ___) => Icon(Icons.g_mobiledata, color: button),
+                    errorBuilder: (_, __, ___) => const Icon(Icons.g_mobiledata, color: button),
                   ),
-                  label: Text(
+                  label: const Text(
                     'Continue with Google',
                     style: TextStyle(
                       color: text,
@@ -324,17 +300,15 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                     ),
                   ),
                   style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: inputBorder),
+                    side: const BorderSide(color: inputBorder),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     backgroundColor: card,
                   ),
                   onPressed: _loading ? null : _signInWithGoogle,
                 ),
               ),
-
               const SizedBox(height: 22),
-
-              // Footer – login link (teal accent)
+              // Footer – login link
               Center(
                 child: GestureDetector(
                   onTap: () {
@@ -344,7 +318,7 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                     text: TextSpan(
                       text: 'Already have an account? ',
                       style: TextStyle(color: text.withOpacity(0.67), fontSize: 15),
-                      children: [
+                      children: const [
                         TextSpan(
                           text: 'Log in',
                           style: TextStyle(color: loginLink, fontWeight: FontWeight.w700),
@@ -354,7 +328,6 @@ class _HospitalSignUpScreenState extends State<HospitalSignUpScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 10),
             ],
           ),

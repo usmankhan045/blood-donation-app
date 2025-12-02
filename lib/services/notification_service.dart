@@ -388,117 +388,101 @@ class NotificationService {
     BloodRequest request,
   ) async {
     try {
-      // 🔧 FIXED: Use 'role' field (consistent with blood_request_repository)
-      // Also query for both isVerified and isActive for broader matching
+      // 🔧 ULTRA-LENIENT: Query ALL blood banks first, then filter minimally
+      // We want to notify as many blood banks as possible - let THEM decide if they can help
       final bloodBanksSnapshot =
           await _fs
               .collection('users')
               .where('role', isEqualTo: 'blood_bank')
-              .where('profileCompleted', isEqualTo: true)
               .get();
 
+      print('🏥 ════════════════════════════════════════════════════════');
       print(
-        '📊 Found ${bloodBanksSnapshot.docs.length} blood banks with completed profiles',
+        '🏥 Found ${bloodBanksSnapshot.docs.length} total blood banks in system',
       );
 
       final eligibleBloodBanks = <BloodBankModel>[];
+      int skippedNoLocation = 0;
+      int skippedTooFar = 0;
 
       for (final doc in bloodBanksSnapshot.docs) {
         try {
           final bloodBank = BloodBankModel.fromFirestore(doc);
-
-          // 🔧 FIXED: Check for either isActive OR isVerified (supports both field names)
           final docData = doc.data();
-          final isActive = docData['isActive'] as bool? ?? false;
-          final isVerifiedFromDoc =
-              docData['isVerified'] as bool? ?? bloodBank.isVerified;
 
-          if (!isActive && !isVerifiedFromDoc) {
-            print(
-              '❌ Blood Bank ${bloodBank.bloodBankName} is not active/verified',
-            );
-            continue;
+          final bloodBankName = docData['bloodBankName'] as String? ?? 
+              docData['email'] as String? ?? 
+              doc.id;
+
+          // 🔧 ULTRA-LENIENT: Only require location - blood banks decide if they can help
+          // Skip profile/approval/active checks - let them see all requests in their area
+          
+          // Check location - this is the ONLY hard requirement
+          GeoPoint? location = bloodBank.location;
+          if (location == null && docData['location'] is GeoPoint) {
+            location = docData['location'] as GeoPoint;
+          }
+          
+          // Also try latitude/longitude fields
+          if (location == null) {
+            final lat = docData['latitude'] as double?;
+            final lng = docData['longitude'] as double?;
+            if (lat != null && lng != null) {
+              location = GeoPoint(lat, lng);
+            }
           }
 
-          if (bloodBank.location == null) {
-            print('❌ Blood Bank ${bloodBank.bloodBankName} has no location');
+          if (location == null) {
+            skippedNoLocation++;
+            print('⚠️  Blood Bank "$bloodBankName" (${doc.id}) has no location - SKIPPED');
             continue;
           }
 
           final distance = _calculateDistance(
             request.latitude,
             request.longitude,
-            bloodBank.location!.latitude,
-            bloodBank.location!.longitude,
+            location.latitude,
+            location.longitude,
           );
 
-          final maxDistance = request.searchRadius * 2.0;
+          // 🔧 VERY LARGE RADIUS: 5x search radius for blood banks
+          final maxDistance = request.searchRadius * 5.0;
 
           if (distance > maxDistance) {
+            skippedTooFar++;
             print(
-              '❌ ${bloodBank.bloodBankName} too far: ${distance.toStringAsFixed(1)}km',
+              '📍 "$bloodBankName" too far: ${distance.toStringAsFixed(1)}km (max: ${maxDistance.toStringAsFixed(1)}km)',
             );
             continue;
           }
 
-          // 🔧 FIXED: Check inventory from both model and subcollection
-          bool hasEnoughInventory = false;
-          int availableUnits = 0;
-
-          // First check: BloodBankModel inventory (embedded in user document)
-          if (bloodBank.inventory.containsKey(request.bloodType)) {
-            final inventoryData = bloodBank.inventory[request.bloodType];
-            if (inventoryData is Map && inventoryData['units'] != null) {
-              availableUnits = (inventoryData['units'] as num).toInt();
-              hasEnoughInventory = availableUnits >= request.units;
-            }
-          }
-
-          // Second check: Subcollection inventory (if first check failed)
-          if (!hasEnoughInventory) {
-            try {
-              final inventoryDoc =
-                  await _fs
-                      .collection('blood_banks')
-                      .doc(bloodBank.uid)
-                      .collection('inventory')
-                      .doc(request.bloodType)
-                      .get();
-
-              if (inventoryDoc.exists) {
-                final data = inventoryDoc.data();
-                availableUnits =
-                    (data?['availableUnits'] as num?)?.toInt() ??
-                    (data?['units'] as num?)?.toInt() ??
-                    0;
-                hasEnoughInventory = availableUnits >= request.units;
-              }
-            } catch (e) {
-              print(
-                '⚠️  Could not check subcollection inventory for ${bloodBank.bloodBankName}: $e',
-              );
-            }
-          }
-
-          if (hasEnoughInventory) {
-            eligibleBloodBanks.add(bloodBank);
-            print(
-              '✅ ${bloodBank.bloodBankName} - ${distance.toStringAsFixed(1)}km - Has $availableUnits units',
-            );
-          } else if (availableUnits > 0) {
-            print(
-              '⚠️  ${bloodBank.bloodBankName} - Insufficient units: $availableUnits < ${request.units}',
-            );
-          } else {
-            print(
-              '❌ ${bloodBank.bloodBankName} - No ${request.bloodType} in inventory',
-            );
-          }
+          // ✅ Blood bank is eligible - add to list
+          eligibleBloodBanks.add(bloodBank);
+          
+          // Log detailed info for debugging
+          final profileCompleted = docData['profileCompleted'] as bool? ?? false;
+          final isActive = docData['isActive'] as bool? ?? false;
+          final isVerified = docData['isVerified'] as bool? ?? false;
+          final hasFcmToken = (docData['fcmToken'] as String?)?.isNotEmpty == true;
+          
+          print(
+            '✅ ELIGIBLE: "$bloodBankName" - ${distance.toStringAsFixed(1)}km | '
+            'profile:$profileCompleted active:$isActive verified:$isVerified fcm:$hasFcmToken',
+          );
         } catch (e) {
           print('❌ Error processing blood bank ${doc.id}: $e');
         }
       }
 
+      print('🏥 ════════════════════════════════════════════════════════');
+      print('📊 Blood Bank Filtering Summary:');
+      print('   - Total blood banks: ${bloodBanksSnapshot.docs.length}');
+      print('   - Skipped (no location): $skippedNoLocation');
+      print('   - Skipped (too far): $skippedTooFar');
+      print('   - ✅ ELIGIBLE FOR NOTIFICATION: ${eligibleBloodBanks.length}');
+      print('🏥 ════════════════════════════════════════════════════════');
+
+      // Sort by distance
       eligibleBloodBanks.sort((a, b) {
         final distA = _calculateDistance(
           request.latitude,

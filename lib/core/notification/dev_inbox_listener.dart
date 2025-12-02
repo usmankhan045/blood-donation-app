@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/custom_snackbar.dart';
+import '../../services/navigation_service.dart';
 
 class DevInboxListener {
   DevInboxListener._();
@@ -57,11 +59,23 @@ class DevInboxListener {
           final title = (data['title'] ?? 'New notification').toString();
           final body = (data['body'] ?? '').toString();
           final requestId = (data['requestId'] ?? '').toString();
+          final type = (data['type'] ?? '').toString();
+          final threadId = (data['threadId'] ?? '').toString();
+          final targetType = (data['targetType'] ?? '').toString();
 
-          print('🔔 DevInboxListener: Showing notification - $title');
+          print('🔔 DevInboxListener: Showing notification - $title (type: $type)');
 
-          // Show notification
-          _showNotification(title, body, requestId, id, user.uid);
+          // Show notification with navigation support
+          _showNotification(
+            title,
+            body,
+            requestId,
+            id,
+            user.uid,
+            type: type.isNotEmpty ? type : null,
+            threadId: threadId.isNotEmpty ? threadId : null,
+            targetType: targetType.isNotEmpty ? targetType : null,
+          );
 
           // Mark as shown in this session
           _shownNotifications.add(id);
@@ -81,83 +95,97 @@ class DevInboxListener {
     await checkUnreadNotifications();
   }
 
-  /// Show the notification snackbar
+  /// Show the notification snackbar using the new top snackbar system
   static void _showNotification(
     String title,
     String body,
     String requestId,
     String docId,
-    String userId,
-  ) {
+    String userId, {
+    String? type,
+    String? threadId,
+    String? targetType,
+  }) {
     if (_context == null) {
       print('❌ DevInboxListener: Context is null');
       return;
     }
 
     try {
-      final messenger = ScaffoldMessenger.maybeOf(_context!);
-      if (messenger == null) {
-        print('❌ DevInboxListener: ScaffoldMessenger not found');
-        return;
-      }
-
-      messenger.showSnackBar(
-        SnackBar(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.notifications_active,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (body.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(body, style: const TextStyle(fontSize: 12)),
-              ],
-            ],
-          ),
-          backgroundColor: Colors.green.shade700,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          action: SnackBarAction(
-            label: 'VIEW',
-            textColor: Colors.white,
-            onPressed: () {
-              // Mark as read when user taps View
-              _markAsRead(userId, docId);
-            },
-          ),
-          duration: const Duration(seconds: 8),
-        ),
+      // Use the new modern top snackbar
+      AppSnackbar.showNotification(
+        _context!,
+        title: title,
+        body: body,
+        type: type,
+        requestId: requestId,
+        threadId: threadId,
+        onTap: () {
+          // Mark as read when user taps
+          _markAsRead(userId, docId);
+          
+          // Navigate based on notification type
+          _navigateToNotification(type, requestId, threadId, targetType);
+        },
       );
 
-      print('✅ DevInboxListener: Snackbar shown');
+      print('✅ DevInboxListener: Top snackbar shown');
 
-      // Auto-mark as read after showing
-      Future.delayed(const Duration(seconds: 8), () {
+      // Auto-mark as read after snackbar disappears
+      Future.delayed(const Duration(seconds: 3), () {
         _markAsRead(userId, docId);
       });
     } catch (e) {
       print('❌ DevInboxListener: Error showing snackbar - $e');
+    }
+  }
+  
+  /// Navigate to the appropriate screen based on notification type
+  static void _navigateToNotification(
+    String? type,
+    String requestId,
+    String? threadId,
+    String? targetType,
+  ) {
+    switch (type) {
+      case 'blood_request':
+      case 'emergency_blood_request':
+        if (targetType == 'donor') {
+          NavigationService.instance.navigateTo('/donor_requests');
+        } else if (targetType == 'blood_bank') {
+          NavigationService.instance.navigateTo('/blood_bank_dashboard');
+        } else if (targetType == 'hospital') {
+          NavigationService.instance.navigateTo('/hospital/my_requests');
+        } else {
+          NavigationService.instance.navigateTo('/donor_requests');
+        }
+        break;
+      case 'request_accepted':
+        if (targetType == 'recipient') {
+          NavigationService.instance.navigateTo('/recipient/my_requests');
+        } else if (targetType == 'hospital') {
+          NavigationService.instance.navigateTo('/hospital/my_requests');
+        } else {
+          NavigationService.instance.navigateTo('/recipient/my_requests');
+        }
+        break;
+      case 'chat_message':
+        NavigationService.instance.navigateTo('/chats');
+        break;
+      case 'fulfillment_reminder':
+        NavigationService.instance.navigateTo('/blood_bank_dashboard');
+        break;
+      default:
+        // For unknown types, try to navigate based on targetType
+        if (targetType == 'donor') {
+          NavigationService.instance.navigateTo('/donor_requests');
+        } else if (targetType == 'blood_bank') {
+          NavigationService.instance.navigateTo('/blood_bank_dashboard');
+        } else if (targetType == 'hospital') {
+          NavigationService.instance.navigateTo('/hospital/my_requests');
+        } else if (targetType == 'recipient') {
+          NavigationService.instance.navigateTo('/recipient/my_requests');
+        }
     }
   }
 

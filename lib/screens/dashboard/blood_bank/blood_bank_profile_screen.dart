@@ -44,14 +44,13 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
 
           final data = (snap.data!.data() as Map<String, dynamic>?) ?? {};
           final verified = (data['isVerified'] ?? false) as bool;
-          final approved = (data['isApproved'] ?? false) as bool;
           final completed = (data['profileCompleted'] ?? false) as bool;
           final profileCompletedAt = data['profileCompletedAt'] as Timestamp?;
 
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              _buildAppBar(data, verified, approved, completed),
+              _buildAppBar(data, verified, completed),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -62,7 +61,7 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
                       const SizedBox(height: 20),
 
                       // Profile Sections
-                      _buildViewSection(data, verified, approved, completed, profileCompletedAt),
+                      _buildViewSection(data, verified, completed, profileCompletedAt),
 
                       const SizedBox(height: 24),
 
@@ -123,7 +122,6 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
   Widget _buildAppBar(
     Map<String, dynamic> data,
     bool verified,
-    bool approved,
     bool completed,
   ) {
     final name = data['bloodBankName'] ?? 'Blood Bank';
@@ -219,11 +217,6 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
                         completed ? 'Complete' : 'Incomplete',
                         completed ? BloodAppTheme.success : BloodAppTheme.warning,
                         completed ? Icons.check_circle : Icons.pending,
-                      ),
-                      _buildStatusChip(
-                        approved ? 'Approved' : 'Pending Approval',
-                        approved ? BloodAppTheme.success : BloodAppTheme.warning,
-                        approved ? Icons.verified : Icons.pending_actions,
                       ),
                       _buildStatusChip(
                         verified ? 'Verified' : 'Unverified',
@@ -348,7 +341,6 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
   Widget _buildViewSection(
     Map<String, dynamic> data,
     bool verified,
-    bool approved,
     bool completed,
     Timestamp? profileCompletedAt,
   ) {
@@ -406,7 +398,6 @@ class _BloodBankProfileScreenState extends State<BloodBankProfileScreen> {
           icon: Icons.verified_user,
           items: [
             _InfoItem('Profile', completed ? 'Complete ✓' : 'Incomplete'),
-            _InfoItem('Approval', approved ? 'Approved ✓' : 'Pending'),
             _InfoItem('Verification', verified ? 'Verified ✓' : 'Pending'),
             _InfoItem('Role', 'Blood Bank'),
             if (profileCompletedAt != null)

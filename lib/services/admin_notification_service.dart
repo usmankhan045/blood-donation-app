@@ -95,6 +95,84 @@ class AdminNotificationService {
       print('❌ Error notifying admins about approval request: $e');
     }
   }
+
+  /// Notify institution when their account is approved
+  Future<void> notifyApprovalSuccess({
+    required String userId,
+    required String role,
+  }) async {
+    try {
+      final roleName = role == 'blood_bank' ? 'Blood Bank' : 'Hospital';
+      
+      await _fs
+          .collection('user_notifications')
+          .doc(userId)
+          .collection('inbox')
+          .add({
+        'title': 'Account Approved! 🎉',
+        'body': 'Congratulations! Your $roleName account has been approved by the admin. You can now login and start using the app.',
+        'type': 'account_approved',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      print('✅ Approval notification sent to user: $userId');
+    } catch (e) {
+      print('❌ Error notifying user about approval: $e');
+    }
+  }
+
+  /// Notify institution when their account is rejected
+  Future<void> notifyApprovalRejection({
+    required String userId,
+    required String role,
+    String? reason,
+  }) async {
+    try {
+      final roleName = role == 'blood_bank' ? 'Blood Bank' : 'Hospital';
+      
+      await _fs
+          .collection('user_notifications')
+          .doc(userId)
+          .collection('inbox')
+          .add({
+        'title': 'Account Application Rejected',
+        'body': reason != null && reason.isNotEmpty
+            ? 'Your $roleName account application has been rejected. Reason: $reason'
+            : 'Your $roleName account application has been rejected. Please contact support for more information.',
+        'type': 'account_rejected',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      print('✅ Rejection notification sent to user: $userId');
+    } catch (e) {
+      print('❌ Error notifying user about rejection: $e');
+    }
+  }
+
+  /// Get pending approval count for admin badge
+  Future<int> getPendingApprovalsCount() async {
+    try {
+      final snapshot = await _fs
+          .collection('approval_requests')
+          .where('status', isEqualTo: 'pending')
+          .get();
+      return snapshot.docs.length;
+    } catch (e) {
+      print('❌ Error getting pending approvals count: $e');
+      return 0;
+    }
+  }
+
+  /// Stream pending approvals count for real-time updates
+  Stream<int> streamPendingApprovalsCount() {
+    return _fs
+        .collection('approval_requests')
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
 }
 
 final adminNotificationService = AdminNotificationService();

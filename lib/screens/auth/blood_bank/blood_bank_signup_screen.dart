@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../../services/auth_service.dart';
 
 class BloodBankSignUpScreen extends StatefulWidget {
   const BloodBankSignUpScreen({Key? key}) : super(key: key);
@@ -14,6 +15,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _authService = AuthService();
   bool _showPass = false;
   bool _loading = false;
   String? _error;
@@ -25,52 +27,29 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
     });
 
     try {
-      UserCredential cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passCtrl.text.trim(),
+      final error = await _authService.signUpBloodBank(
+        _emailCtrl.text.trim(),
+        _passCtrl.text.trim(),
       );
-      await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
-        'email': _emailCtrl.text.trim(),
-        'role': 'blood_bank',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
 
-      // Send verification email
-      await cred.user!.sendEmailVerification();
+      if (error != null) {
+        setState(() {
+          _error = error;
+          _loading = false;
+        });
+        return;
+      }
 
       setState(() => _loading = false);
 
-      // Show verification dialog
       if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: Text('Verify Your Email'),
-            content: Text(
-                'A verification link has been sent to your email. Please verify your email before logging in.'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.pushReplacementNamed(context, '/blood_bank_login');
-                },
-                child: Text('OK'),
-              ),
-            ],
-          ),
-        );
+        Navigator.pushReplacementNamed(context, '/blood_bank_dashboard');
       }
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = e.message;
-      });
     } catch (e) {
       setState(() {
-        _error = 'Sign up failed. Please try again.';
+        _error = 'Sign up failed: $e';
+        _loading = false;
       });
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -101,17 +80,22 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
       final userSnapshot = await userDoc.get();
 
       if (!userSnapshot.exists) {
+        // Create new blood bank user
         await userDoc.set({
           'email': userCred.user!.email,
           'role': 'blood_bank',
           'createdAt': FieldValue.serverTimestamp(),
         });
-      } else if (userSnapshot['role'] != 'blood_bank') {
-        setState(() {
-          _error = 'This Google account is already registered as a different role.';
-        });
-        await FirebaseAuth.instance.signOut();
-        return;
+      } else {
+        // Existing user - check role
+        final userData = userSnapshot.data()!;
+        if (userData['role'] != 'blood_bank') {
+          setState(() {
+            _error = 'This Google account is already registered as a different role.';
+          });
+          await FirebaseAuth.instance.signOut();
+          return;
+        }
       }
 
       if (mounted) {
@@ -132,16 +116,13 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Light, neutral background and fields
     const background = Color(0xFFF6F9FB);
     const card = Color(0xFFFFFFFF);
     const inputBorder = Color(0xFFE0E7EF);
     const text = Color(0xFF3A4958);
-
-    // Soft blue for button and login link
-    const button = Color(0xFF7FBFFF); // Light blue
+    const button = Color(0xFF7FBFFF);
     const buttonText = Colors.white;
-    const loginLink = Color(0xFF2266AA); // Deep blue for login link
+    const loginLink = Color(0xFF2266AA);
 
     return Scaffold(
       backgroundColor: background,
@@ -157,7 +138,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Sign Up as Blood Bank',
                 style: TextStyle(
                   fontSize: 28,
@@ -171,7 +152,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                 'Manage blood stock, requests, and connect with hospitals.',
                 style: TextStyle(fontSize: 16, color: text.withOpacity(0.65)),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
               // Email field
               Container(
                 decoration: BoxDecoration(
@@ -246,7 +227,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-              // Sign up button (LIGHT BLUE)
+              // Sign up button
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -260,21 +241,21 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                   onPressed: _loading
                       ? null
                       : () {
-                    if (_formKey.currentState!.validate()) {
-                      _signUpBloodBank();
-                    }
-                  },
+                          if (_formKey.currentState!.validate()) {
+                            _signUpBloodBank();
+                          }
+                        },
                   child: _loading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
-                    'Create Account',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                      color: buttonText,
-                    ),
-                  ),
+                          'Create Account',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                            color: buttonText,
+                          ),
+                        ),
                 ),
               ),
               if (_error != null) ...[
@@ -307,9 +288,9 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                     'assets/images/google_logo.png',
                     width: 24,
                     height: 24,
-                    errorBuilder: (_, __, ___) => Icon(Icons.g_mobiledata, color: button),
+                    errorBuilder: (_, __, ___) => const Icon(Icons.g_mobiledata, color: button),
                   ),
-                  label: Text(
+                  label: const Text(
                     'Continue with Google',
                     style: TextStyle(
                       color: text,
@@ -319,7 +300,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                     ),
                   ),
                   style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: inputBorder),
+                    side: const BorderSide(color: inputBorder),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     backgroundColor: card,
                   ),
@@ -327,7 +308,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                 ),
               ),
               const SizedBox(height: 22),
-              // Footer – login link (blue accent)
+              // Footer – login link
               Center(
                 child: GestureDetector(
                   onTap: () {
@@ -337,7 +318,7 @@ class _BloodBankSignUpScreenState extends State<BloodBankSignUpScreen> {
                     text: TextSpan(
                       text: 'Already have an account? ',
                       style: TextStyle(color: text.withOpacity(0.67), fontSize: 15),
-                      children: [
+                      children: const [
                         TextSpan(
                           text: 'Log in',
                           style: TextStyle(color: loginLink, fontWeight: FontWeight.w700),

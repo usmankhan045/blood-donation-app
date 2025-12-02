@@ -3,10 +3,195 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../models/blood_request_model.dart';
 import '../../../repositories/blood_request_repository.dart';
+import '../../../services/fulfillment_service.dart';
 import '../../../widgets/modern_request_card.dart';
 import '../../../widgets/custom_snackbar.dart';
 import '../../../core/theme.dart';
-import 'dart:async';
+import '../../chat/chat_screen.dart';
+
+// ═══════════════════════════════════════════════════════════════
+// 🩸 PENDING INVENTORY DEDUCTION CARD
+// Shows when requester marks donation complete and blood bank
+// needs to confirm/decline inventory deduction
+// ═══════════════════════════════════════════════════════════════
+
+class PendingInventoryDeductionCard extends StatelessWidget {
+  final Map<String, dynamic> deduction;
+  final VoidCallback onConfirm;
+  final VoidCallback onDecline;
+
+  const PendingInventoryDeductionCard({
+    super.key,
+    required this.deduction,
+    required this.onConfirm,
+    required this.onDecline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bloodType = deduction['bloodType'] as String? ?? '';
+    final units = (deduction['units'] as num?)?.toInt() ?? 0;
+    final requesterName = deduction['requesterName'] as String? ?? 'Requester';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF6B6B), Color(0xFFE53935)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.inventory_2,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '🩸 Inventory Deduction Required',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Donation completed by $requesterName',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      Text(
+                        bloodType,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Blood Type',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    height: 40,
+                    width: 1,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        '$units',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Unit${units > 1 ? 's' : ''} to Deduct',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onDecline,
+                    icon: const Icon(Icons.close, size: 18),
+                    label: const Text('Decline'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton.icon(
+                    onPressed: onConfirm,
+                    icon: const Icon(Icons.check, size: 18),
+                    label: const Text('Confirm & Deduct'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: BloodAppTheme.error,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class BloodBankRequestsScreen extends StatefulWidget {
   const BloodBankRequestsScreen({super.key});
@@ -21,21 +206,16 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
   final _uid = FirebaseAuth.instance.currentUser!.uid;
 
   late TabController _tabController;
-  Timer? _updateTimer;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _updateTimer?.cancel();
     super.dispose();
   }
 
@@ -93,56 +273,243 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
   Widget _buildAvailableRequests() {
     return StreamBuilder<List<BloodRequest>>(
       stream: _repo.getAvailableRequestsForBloodBank(_uid),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildLoadingState();
-        }
+      builder: (context, requestsSnapshot) {
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: FulfillmentService.instance.getPendingInventoryDeductions(_uid),
+          builder: (context, deductionsSnapshot) {
+            if (requestsSnapshot.connectionState == ConnectionState.waiting) {
+              return _buildLoadingState();
+            }
 
-        if (snapshot.hasError) {
-          return _buildErrorState('Error loading requests');
-        }
+            if (requestsSnapshot.hasError) {
+              return _buildErrorState('Error loading requests');
+            }
 
-        final requests = snapshot.data ?? [];
-        final activeRequests = requests.where((r) => !r.isExpired).toList();
+            final requests = requestsSnapshot.data ?? [];
+            final activeRequests = requests.where((r) => !r.isExpired).toList();
+            final pendingDeductions = deductionsSnapshot.data ?? [];
 
-        if (activeRequests.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.inbox_outlined,
-            title: 'No Active Requests',
-            subtitle: 'You\'ll be notified when new requests\nmatch your inventory.',
-          );
-        }
+            if (activeRequests.isEmpty && pendingDeductions.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.inbox_outlined,
+                title: 'No Active Requests',
+                subtitle: 'You\'ll be notified when new requests\nmatch your inventory.',
+              );
+            }
 
-        return Column(
-          children: [
-            _buildStatsHeader(activeRequests),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () async => setState(() {}),
-                color: BloodAppTheme.primary,
-                child: ListView.builder(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  padding: const EdgeInsets.only(bottom: 20),
-                  itemCount: activeRequests.length,
-                  itemBuilder: (context, index) {
-                    final request = activeRequests[index];
-                    return ModernRequestCard(
-                      request: request,
-                      isRecipientView: false,
-                      onAccept: () => _acceptRequest(request),
-                      onViewDetails: () => _showRequestDetails(request),
-                      showActions: true,
-                    );
-                  },
+            return RefreshIndicator(
+              onRefresh: () async => setState(() {}),
+              color: BloodAppTheme.primary,
+              child: ListView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
                 ),
+                padding: const EdgeInsets.only(bottom: 20),
+                children: [
+                  // Pending inventory deductions (urgent - show first)
+                  if (pendingDeductions.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber, color: BloodAppTheme.error, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'ACTION REQUIRED (${pendingDeductions.length})',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: BloodAppTheme.error,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ...pendingDeductions.map((deduction) => PendingInventoryDeductionCard(
+                      deduction: deduction,
+                      onConfirm: () => _confirmInventoryDeduction(deduction),
+                      onDecline: () => _declineInventoryDeduction(deduction),
+                    )),
+                    const Divider(height: 32),
+                  ],
+
+                  // Stats header
+                  if (activeRequests.isNotEmpty) _buildStatsHeader(activeRequests),
+
+                  // Active requests
+                  ...activeRequests.map((request) => ModernRequestCard(
+                    request: request,
+                    isRecipientView: false,
+                    onAccept: () => _acceptRequest(request),
+                    onDecline: () => _declineRequest(request),
+                    onViewDetails: () => _showRequestDetails(request),
+                    showActions: true,
+                  )),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         );
       },
     );
+  }
+
+  Future<void> _confirmInventoryDeduction(Map<String, dynamic> deduction) async {
+    final requestId = deduction['requestId'] as String;
+    final bloodType = deduction['bloodType'] as String? ?? '';
+    final units = (deduction['units'] as num?)?.toInt() ?? 0;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.success.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.inventory_2, color: BloodAppTheme.success),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Confirm Deduction?')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('This will deduct $units unit(s) of $bloodType from your inventory.'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.warning.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: BloodAppTheme.warning, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This action cannot be undone. Make sure the blood was actually provided.',
+                      style: TextStyle(fontSize: 12, color: BloodAppTheme.warning),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.success),
+            child: const Text('Confirm & Deduct'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final success = await FulfillmentService.instance.confirmInventoryDeduction(
+        requestId: requestId,
+      );
+
+      if (mounted) {
+        if (success) {
+          AppSnackbar.showSuccess(
+            context,
+            'Inventory Updated! 🩸',
+            subtitle: '$units unit(s) of $bloodType deducted from inventory',
+          );
+        } else {
+          AppSnackbar.showError(context, 'Failed to update inventory');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Error: ${e.toString()}');
+      }
+    }
+  }
+
+  Future<void> _declineInventoryDeduction(Map<String, dynamic> deduction) async {
+    final requestId = deduction['requestId'] as String;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.error.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, color: BloodAppTheme.error),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Decline Deduction?')),
+          ],
+        ),
+        content: const Text(
+          'If you decline, the inventory will NOT be deducted. '
+          'Only decline if the blood was not actually provided from your stock.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.error),
+            child: const Text('Decline'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final success = await FulfillmentService.instance.declineInventoryDeduction(
+        requestId: requestId,
+        reason: 'Blood bank declined deduction',
+      );
+
+      if (mounted) {
+        if (success) {
+          AppSnackbar.showInfo(
+            context,
+            'Deduction Declined',
+            subtitle: 'Inventory was not modified',
+          );
+        } else {
+          AppSnackbar.showError(context, 'Failed to decline');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Error: ${e.toString()}');
+      }
+    }
   }
 
   Widget _buildAcceptedRequests() {
@@ -191,7 +558,8 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
               return ModernRequestCard(
                 request: request,
                 isRecipientView: false,
-                onComplete: () => _completeRequest(request),
+                onComplete: () => _showFulfillmentConfirmation(request),
+                onChat: () => _openChat(request),
                 onViewDetails: () => _showRequestDetails(request),
                 showActions: true,
                 showTimer: false,
@@ -203,16 +571,197 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
     );
   }
 
+  void _openChat(BloodRequest request) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          threadId: request.id,
+          title: request.requesterName,
+          subtitle: '${request.bloodType} Blood Request - ${request.units} unit(s)',
+          otherUserName: request.requesterName,
+          otherUserId: request.requesterId,
+          bloodType: request.bloodType,
+          units: request.units,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFulfillmentConfirmation(BloodRequest request) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.success.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.inventory_2, color: BloodAppTheme.success),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text('Confirm Fulfillment'),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Did you fulfill this blood request?',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.water_drop, color: BloodAppTheme.primary, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${request.bloodType} - ${request.units} unit(s)',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: BloodAppTheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'For: ${request.requesterName}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: BloodAppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.warning.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: BloodAppTheme.warning, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Confirming will automatically deduct the units from your inventory.',
+                      style: TextStyle(fontSize: 12, color: BloodAppTheme.warning),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, 'decline'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: BloodAppTheme.error,
+              side: const BorderSide(color: BloodAppTheme.error),
+            ),
+            child: const Text('Not Fulfilled'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, 'confirm'),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.success),
+            child: const Text('Confirm & Deduct'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'confirm') {
+      await _confirmFulfillment(request);
+    } else if (result == 'decline') {
+      await _declineFulfillment(request);
+    }
+  }
+
+  Future<void> _confirmFulfillment(BloodRequest request) async {
+    try {
+      final success = await FulfillmentService.instance.confirmFulfillment(
+        requestId: request.id,
+        bloodBankId: _uid,
+        bloodType: request.bloodType,
+        units: request.units,
+      );
+
+      if (mounted) {
+        if (success) {
+          AppSnackbar.showSuccess(
+            context,
+            'Request completed! 🎉',
+            subtitle: '${request.units} units of ${request.bloodType} deducted from inventory',
+          );
+          _tabController.animateTo(2);
+        } else {
+          AppSnackbar.showError(context, 'Failed to complete request');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Error: ${e.toString()}');
+      }
+    }
+  }
+
+  Future<void> _declineFulfillment(BloodRequest request) async {
+    try {
+      final success = await FulfillmentService.instance.declineFulfillment(
+        requestId: request.id,
+        bloodBankId: _uid,
+        reason: 'Request could not be fulfilled',
+      );
+
+      if (mounted) {
+        if (success) {
+          AppSnackbar.showInfo(
+            context,
+            'Request released',
+            subtitle: 'The request is now available for others',
+          );
+        } else {
+          AppSnackbar.showError(context, 'Failed to release request');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Error: ${e.toString()}');
+      }
+    }
+  }
+
   Widget _buildHistory() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('blood_requests')
-          .where('acceptedBy', isEqualTo: _uid)
-          .where('acceptedByType', isEqualTo: 'blood_bank')
-          .where('status', whereIn: ['completed', 'cancelled', 'expired'])
-          .orderBy('updatedAt', descending: true)
-          .limit(50)
-          .snapshots(),
+    // Show both completed/accepted requests AND declined requests
+    return StreamBuilder<List<List<BloodRequest>>>(
+      stream: _getHistoryRequests(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoadingState();
@@ -222,17 +771,26 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
           return _buildErrorState('Error loading history');
         }
 
-        final requests = snapshot.data?.docs
-                .map((doc) => BloodRequest.fromMap(
-                    doc.data() as Map<String, dynamic>, doc.id))
-                .toList() ??
-            [];
+        final data = snapshot.data ?? [[], []];
+        final completedRequests = data[0];
+        final declinedRequests = data[1];
+        
+        // Combine and sort by date
+        final allRequests = [...completedRequests, ...declinedRequests];
+        allRequests.sort((a, b) {
+          final aTime = a.completedAt ?? a.createdAt;
+          final bTime = b.completedAt ?? b.createdAt;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
 
-        if (requests.isEmpty) {
+        if (allRequests.isEmpty) {
           return _buildEmptyState(
             icon: Icons.history,
             title: 'No History',
-            subtitle: 'Completed requests will appear here.',
+            subtitle: 'Completed and declined requests\nwill appear here.',
           );
         }
 
@@ -244,21 +802,73 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
               parent: AlwaysScrollableScrollPhysics(),
             ),
             padding: const EdgeInsets.only(bottom: 20),
-            itemCount: requests.length,
+            itemCount: allRequests.length,
             itemBuilder: (context, index) {
-              final request = requests[index];
-              return ModernRequestCard(
-                request: request,
-                isRecipientView: false,
-                onViewDetails: () => _showRequestDetails(request),
-                showActions: false,
-                showTimer: false,
+              final request = allRequests[index];
+              final isDeclined = declinedRequests.any((r) => r.id == request.id);
+              
+              return Stack(
+                children: [
+                  ModernRequestCard(
+                    request: request,
+                    isRecipientView: false,
+                    onViewDetails: () => _showRequestDetails(request),
+                    showActions: false,
+                    showTimer: false,
+                  ),
+                  // Show "Declined" badge for declined requests
+                  if (isDeclined)
+                    Positioned(
+                      top: 16,
+                      right: 24,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: BloodAppTheme.error,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'DECLINED',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               );
             },
           ),
         );
       },
     );
+  }
+
+  // Combine completed and declined requests into one stream
+  Stream<List<List<BloodRequest>>> _getHistoryRequests() {
+    // Stream 1: Completed/cancelled/expired requests that this blood bank accepted
+    final completedStream = FirebaseFirestore.instance
+        .collection('blood_requests')
+        .where('acceptedBy', isEqualTo: _uid)
+        .where('acceptedByType', isEqualTo: 'blood_bank')
+        .where('status', whereIn: ['completed', 'cancelled', 'expired'])
+        .orderBy('updatedAt', descending: true)
+        .limit(25)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => BloodRequest.fromMap(doc.data(), doc.id))
+            .toList());
+
+    // Stream 2: Declined requests
+    final declinedStream = _repo.getDeclinedRequestsForBloodBank(_uid);
+
+    // Combine both streams
+    return completedStream.asyncMap((completed) async {
+      final declined = await declinedStream.first;
+      return [completed, declined];
+    });
   }
 
   Widget _buildStatsHeader(List<BloodRequest> requests) {
@@ -458,6 +1068,94 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
     );
   }
 
+  Future<void> _declineRequest(BloodRequest request) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.error.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, color: BloodAppTheme.error),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text('Decline Request?'),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Blood Type: ${request.bloodType}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text('Requester: ${request.requesterName}'),
+            Text('Units: ${request.units}'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BloodAppTheme.warning.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: BloodAppTheme.warning, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This request will be removed from your available list and moved to history. Other blood banks can still accept it.',
+                      style: TextStyle(fontSize: 12, color: BloodAppTheme.warning),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.error),
+            child: const Text('Decline'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _repo.declineRequestByBloodBank(request.id, _uid);
+
+      if (mounted) {
+        AppSnackbar.showInfo(
+          context,
+          'Request declined',
+          subtitle: 'This request has been moved to your history',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.showError(context, 'Failed to decline request', subtitle: e.toString());
+      }
+    }
+  }
+
   Future<void> _acceptRequest(BloodRequest request) async {
     final userDoc = await FirebaseFirestore.instance
         .collection('users')
@@ -482,7 +1180,9 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
               child: const Icon(Icons.check, color: BloodAppTheme.success),
             ),
             const SizedBox(width: 12),
-            const Text('Accept Request?'),
+            const Expanded(
+              child: Text('Accept Request?'),
+            ),
           ],
         ),
         content: Column(
@@ -551,61 +1251,6 @@ class _BloodBankRequestsScreenState extends State<BloodBankRequestsScreen>
     }
   }
 
-  Future<void> _completeRequest(BloodRequest request) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: BloodAppTheme.success.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check_circle, color: BloodAppTheme.success),
-            ),
-            const SizedBox(width: 12),
-            const Text('Complete Request?'),
-          ],
-        ),
-        content: const Text('Mark this request as completed?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.success),
-            child: const Text('Complete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    try {
-      await _repo.completeRequest(request.id);
-
-      if (mounted) {
-        AppSnackbar.showSuccess(
-          context,
-          'Request completed! 🎉',
-          subtitle: 'Thank you for saving a life',
-        );
-        _tabController.animateTo(2);
-      }
-    } catch (e) {
-      if (mounted) {
-        AppSnackbar.showError(context, 'Failed to complete request', subtitle: e.toString());
-      }
-    }
-  }
 
   void _showRequestDetails(BloodRequest request) {
     showModalBottomSheet(

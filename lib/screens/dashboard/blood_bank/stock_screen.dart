@@ -105,9 +105,11 @@ class _StockScreenState extends State<StockScreen> {
               child: const Icon(Icons.edit, color: BloodAppTheme.primary, size: 22),
             ),
             const SizedBox(width: 12),
-            Text(
-              'Update $bloodType Units',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            Expanded(
+              child: Text(
+                'Update $bloodType Units',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -182,9 +184,11 @@ class _StockScreenState extends State<StockScreen> {
               child: const Icon(Icons.tune, color: BloodAppTheme.primary, size: 22),
             ),
             const SizedBox(width: 12),
-            Text(
-              'Quick Adjust $bloodType',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            Expanded(
+              child: Text(
+                'Quick Adjust $bloodType',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -335,9 +339,11 @@ class _StockScreenState extends State<StockScreen> {
               child: const Icon(Icons.add_circle, color: BloodAppTheme.primary, size: 22),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'Add Blood Type',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            const Expanded(
+              child: Text(
+                'Add Blood Type',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),

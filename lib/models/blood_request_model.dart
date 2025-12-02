@@ -17,6 +17,8 @@ class BloodRequest {
   final String status; // active | accepted | completed | cancelled | expired
   final String? acceptedBy;
   final String? acceptedByName;
+  final String? acceptedByType; // 'donor' or 'blood_bank'
+  final String? acceptedBloodBankName; // Name of the blood bank if accepted by one
   final DateTime? createdAt;
   final DateTime? neededBy;
   final int searchRadius; // in kilometers
@@ -56,6 +58,8 @@ class BloodRequest {
     this.phone,
     this.acceptedBy,
     this.acceptedByName,
+    this.acceptedByType,
+    this.acceptedBloodBankName,
     DateTime? createdAt,
     this.neededBy,
     this.searchRadius = 10,
@@ -131,6 +135,8 @@ class BloodRequest {
       status: (data['status'] ?? 'active') as String,
       acceptedBy: data['acceptedBy'] as String?,
       acceptedByName: data['acceptedByName'] as String?,
+      acceptedByType: data['acceptedByType'] as String?,
+      acceptedBloodBankName: data['acceptedBloodBankName'] as String?,
       createdAt: createdAt,
       neededBy: _parseTimestamp(data['neededBy']),
       searchRadius: (data['searchRadius'] as int?) ?? 10,
@@ -171,6 +177,8 @@ class BloodRequest {
       'status': status,
       'acceptedBy': acceptedBy,
       'acceptedByName': acceptedByName,
+      'acceptedByType': acceptedByType,
+      'acceptedBloodBankName': acceptedBloodBankName,
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
       'neededBy': neededBy != null ? Timestamp.fromDate(neededBy!) : null,
       'searchRadius': searchRadius,
@@ -244,7 +252,6 @@ class BloodRequest {
     if (remaining.inHours > 0) {
       return '${remaining.inHours}h ${remaining.inMinutes.remainder(60)}m';
     } else {
-      final minutes = remaining.inMinutes.remainder(60).toString().padLeft(2, '0');
       final seconds = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
       return '${remaining.inMinutes}m ${seconds}s';
     }
@@ -378,6 +385,8 @@ class BloodRequest {
     String? status,
     String? acceptedBy,
     String? acceptedByName,
+    String? acceptedByType,
+    String? acceptedBloodBankName,
     DateTime? createdAt,
     DateTime? neededBy,
     int? searchRadius,
@@ -411,6 +420,8 @@ class BloodRequest {
       status: status ?? this.status,
       acceptedBy: acceptedBy ?? this.acceptedBy,
       acceptedByName: acceptedByName ?? this.acceptedByName,
+      acceptedByType: acceptedByType ?? this.acceptedByType,
+      acceptedBloodBankName: acceptedBloodBankName ?? this.acceptedBloodBankName,
       createdAt: createdAt ?? this.createdAt,
       neededBy: neededBy ?? this.neededBy,
       searchRadius: searchRadius ?? this.searchRadius,

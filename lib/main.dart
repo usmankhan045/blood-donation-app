@@ -20,7 +20,6 @@ import 'package:blood_donation_app/screens/dashboard/admin/admin_verify_users_sc
 import 'package:blood_donation_app/screens/dashboard/admin/admin_manage_users_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_profile_completion_screen.dart';
-import 'package:blood_donation_app/screens/dashboard/blood_bank/blood_bank_requests_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/blood_bank/stock_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/donor/donor_profile_completion.dart';
@@ -28,6 +27,9 @@ import 'package:blood_donation_app/screens/dashboard/donor/donor_profile_screen.
 import 'package:blood_donation_app/screens/dashboard/donor/donor_requests_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/hospital/hospital_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/hospital/hospital_profile_completion.dart';
+import 'package:blood_donation_app/screens/dashboard/hospital/hospital_request_screen.dart';
+import 'package:blood_donation_app/screens/dashboard/hospital/hospital_my_requests_screen.dart';
+import 'package:blood_donation_app/screens/chat/chat_list_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_alerts_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_dashboard_screen.dart';
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_my_requests_screen.dart';
@@ -36,6 +38,7 @@ import 'package:blood_donation_app/screens/dashboard/recipient/recipient_profile
 import 'package:blood_donation_app/screens/dashboard/recipient/recipient_request_screen.dart';
 import 'package:blood_donation_app/services/service_locator.dart';
 import 'package:blood_donation_app/services/location_service.dart';
+import 'package:blood_donation_app/services/navigation_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -79,6 +82,9 @@ void main() async {
     print('❌ FCM initialization error: $e');
   }
 
+  // 🏥 NOTE: Fulfillment service will be initialized after user login
+  // processPendingFulfillments() requires authentication, so it's called in splash_screen
+
   runApp(BloodDonationApp());
 }
 
@@ -95,6 +101,7 @@ class BloodDonationApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Blood Donation App',
         debugShowCheckedModeBanner: false,
+        navigatorKey: NavigationService.instance.navigatorKey,
         theme: ThemeData(
           primaryColor: const Color(0xFF67D5B5),
           scaffoldBackgroundColor: const Color(0xFFF6F9FB),
@@ -143,6 +150,9 @@ class BloodDonationApp extends StatelessWidget {
           '/completed_requests': (context) => const MyRequestsScreen(),
           '/blood_bank_requests': (context) => const BloodBankDashboardScreen(),
           '/blood_bank_inventory': (context) => const StockScreen(),
+          '/hospital/request': (context) => const HospitalRequestScreen(),
+          '/hospital/my_requests': (context) => const HospitalMyRequestsScreen(),
+          '/chats': (context) => const ChatListScreen(),
         },
       ),
     );

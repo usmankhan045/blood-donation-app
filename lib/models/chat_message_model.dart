@@ -17,12 +17,22 @@ class ChatMessage {
 
   factory ChatMessage.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
+    
+    // Handle null createdAt (happens when serverTimestamp hasn't been written yet)
+    DateTime createdAtDate;
+    final createdAtData = d['createdAt'];
+    if (createdAtData is Timestamp) {
+      createdAtDate = createdAtData.toDate();
+    } else {
+      createdAtDate = DateTime.now();
+    }
+    
     return ChatMessage(
       id: doc.id,
-      threadId: d['threadId'] as String,
-      senderId: d['senderId'] as String,
+      threadId: (d['threadId'] ?? '') as String,
+      senderId: (d['senderId'] ?? '') as String,
       text: (d['text'] ?? '') as String,
-      createdAt: (d['createdAt'] as Timestamp).toDate(),
+      createdAt: createdAtDate,
     );
   }
 

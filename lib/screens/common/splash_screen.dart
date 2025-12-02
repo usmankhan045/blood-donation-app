@@ -6,7 +6,6 @@ import 'select_user_type_screen.dart';
 import '../dashboard/donor/donor_dashboard_screen.dart';
 import '../dashboard/recipient/recipient_dashboard_screen.dart';
 import '../../core/theme.dart';
-// Import other dashboards as needed
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -66,29 +65,6 @@ class _SplashScreenState extends State<SplashScreen> {
         final userData = userDoc.data();
         final userRole = userData?['role'] as String?;
         final profileCompleted = userData?['profileCompleted'] ?? false;
-        
-        // 🔒 SECURITY: Check admin approval for blood banks and hospitals
-        if (userRole == 'blood_bank' || userRole == 'hospital') {
-          final isApproved = userData?['isApproved'] ?? false;
-          final approvalStatus = userData?['approvalStatus'] ?? 'pending';
-          
-          if (!isApproved) {
-            // User not approved - sign them out and show approval screen
-            await FirebaseAuth.instance.signOut();
-            if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ApprovalPendingScreen(
-                    role: userRole!,
-                    status: approvalStatus,
-                  ),
-                ),
-              );
-            }
-            return;
-          }
-        }
 
         print('User role: $userRole, Profile completed: $profileCompleted');
 
@@ -229,127 +205,6 @@ class _SplashScreenState extends State<SplashScreen> {
                 strokeWidth: 3,
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 🔒 APPROVAL PENDING SCREEN
-// ═══════════════════════════════════════════════════════════════
-
-class ApprovalPendingScreen extends StatelessWidget {
-  final String role;
-  final String status;
-
-  const ApprovalPendingScreen({
-    Key? key,
-    required this.role,
-    required this.status,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final roleName = role == 'blood_bank' ? 'Blood Bank' : 'Hospital';
-    final isRejected = status == 'rejected';
-
-    return Scaffold(
-      backgroundColor: BloodAppTheme.background,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: isRejected 
-                        ? BloodAppTheme.error.withOpacity(0.1)
-                        : BloodAppTheme.warning.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isRejected ? Icons.block : Icons.pending_actions,
-                    size: 64,
-                    color: isRejected ? BloodAppTheme.error : BloodAppTheme.warning,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  isRejected ? 'Account Rejected' : 'Account Pending Approval',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: BloodAppTheme.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  isRejected
-                      ? 'Your $roleName account has been rejected by the administrator. Please contact support for assistance.'
-                      : 'Your $roleName account is pending admin approval. You will be able to access the app once an administrator approves your account.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: BloodAppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: BloodAppTheme.info.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: BloodAppTheme.info.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info, color: BloodAppTheme.info, size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'This is a security measure to ensure only verified $roleName accounts can access the platform.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: BloodAppTheme.info,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SelectUserTypeScreen(),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Go Back to Login'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: BloodAppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
       ),

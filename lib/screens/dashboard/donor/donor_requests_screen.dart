@@ -6,6 +6,7 @@ import '../../../widgets/modern_request_card.dart';
 import '../../../widgets/custom_snackbar.dart';
 import '../../../core/theme.dart';
 import '../../../services/donor_matching_service.dart';
+import '../../../repositories/blood_request_repository.dart';
 import '../../chat/chat_screen.dart';
 
 class DonorRequestsScreen extends StatefulWidget {
@@ -42,7 +43,6 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
           .collection('blood_requests')
           .where('potentialDonors', arrayContains: userId)
           .where('status', isEqualTo: 'pending')
-          .orderBy('createdAt', descending: true)
           .snapshots()
           .map((snapshot) {
             final requests =
@@ -52,20 +52,30 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
                       (request) => !request.isExpired,
                     ) // Filter out expired
                     .toList();
+            // Sort by createdAt on client side to avoid index issues
+            requests.sort((a, b) => (b.createdAt ?? DateTime.now())
+                .compareTo(a.createdAt ?? DateTime.now()));
             print('📬 Available requests: ${requests.length}');
             return requests;
           });
 
-      // Stream for accepted requests (both accepted and completed)
+      // 🔧 FIX: Stream for accepted requests - simplified query without orderBy
+      // Filter by acceptedBy and acceptedByType='donor' to only get donor's accepted requests
       _acceptedRequestsStream = _firestore
           .collection('blood_requests')
           .where('acceptedBy', isEqualTo: userId)
-          .orderBy('acceptedAt', descending: true)
+          .where('acceptedByType', isEqualTo: 'donor')
           .snapshots()
-          .map(
-            (snapshot) =>
-                snapshot.docs.map((doc) => BloodRequest.fromDoc(doc)).toList(),
-          );
+          .map((snapshot) {
+            final requests = snapshot.docs
+                .map((doc) => BloodRequest.fromDoc(doc))
+                .toList();
+            // Sort by acceptedAt on client side to avoid index issues
+            requests.sort((a, b) => (b.acceptedAt ?? DateTime.now())
+                .compareTo(a.acceptedAt ?? DateTime.now()));
+            print('📋 My accepted requests: ${requests.length}');
+            return requests;
+          });
     }
   }
 
@@ -571,7 +581,9 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
               ),
             ),
             const SizedBox(width: 12),
-            const Text('Decline Request?'),
+            const Expanded(
+              child: Text('Decline Request?'),
+            ),
           ],
         ),
         content: Column(
@@ -671,7 +683,9 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text('Accept Request?'),
+                const Expanded(
+                  child: Text('Accept Request?'),
+                ),
               ],
             ),
             content: Column(
@@ -697,7 +711,7 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'This request will be assigned to you.',
+                          'This request will be assigned to you and a chat will be started with the recipient.',
                           style: TextStyle(
                             fontSize: 12,
                             color: BloodAppTheme.info,
@@ -719,7 +733,7 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: BloodAppTheme.success,
                 ),
-                child: const Text('Accept'),
+                child: const Text('Accept', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -732,23 +746,39 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
             await _firestore.collection('users').doc(currentUserId).get();
         final donorName = userDoc.data()?['fullName'] ?? 'Anonymous Donor';
 
-        await _donorMatchingService.removeDonorFromPotentialDonors(
+        // 🔧 FIXED: Use the repository method which handles everything:
+        // - Updates status to 'accepted'
+        // - Sets acceptedByType to 'donor'
+        // - Clears potentialDonors array (removes from other donors)
+        // - Initializes chat thread
+        // - Cancels expiration timer
+        await BloodRequestRepository().acceptRequestByDonor(
           request.id,
           currentUserId,
+          donorName,
         );
-
-        await _firestore.collection('blood_requests').doc(request.id).update({
-          'status': 'accepted',
-          'acceptedBy': currentUserId,
-          'acceptedAt': FieldValue.serverTimestamp(),
-          'acceptedByName': donorName,
-        });
 
         if (mounted) {
           AppSnackbar.showSuccess(
             context,
-            'Request accepted successfully!',
-            subtitle: 'Contact the recipient to coordinate donation',
+            'Request accepted successfully! 🎉',
+            subtitle: 'You can now chat with the recipient to coordinate',
+          );
+          
+          // Navigate to chat screen after accepting
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatScreen(
+                threadId: request.id,
+                title: request.requesterName,
+                subtitle: '${request.bloodType} Blood Request - ${request.units} unit(s)',
+                otherUserName: request.requesterName,
+                otherUserId: request.requesterId,
+                bloodType: request.bloodType,
+                units: request.units,
+              ),
+            ),
           );
         }
       } catch (e) {
@@ -822,8 +852,11 @@ class _DonorRequestsScreenState extends State<DonorRequestsScreen>
         builder: (context) => ChatScreen(
           threadId: request.id,
           title: request.requesterName,
-          subtitle: '${request.bloodType} Blood Request',
+          subtitle: '${request.bloodType} Blood Request - ${request.units} unit(s)',
           otherUserName: request.requesterName,
+          otherUserId: request.requesterId,
+          bloodType: request.bloodType,
+          units: request.units,
         ),
       ),
     );

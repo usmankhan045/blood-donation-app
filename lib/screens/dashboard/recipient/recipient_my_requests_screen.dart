@@ -634,7 +634,9 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
               child: const Icon(Icons.cancel, color: BloodAppTheme.warning),
             ),
             const SizedBox(width: 12),
-            const Text('Cancel Request?'),
+            const Expanded(
+              child: Text('Cancel Request?'),
+            ),
           ],
         ),
         content: const Text(
@@ -690,7 +692,9 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
               child: const Icon(Icons.check_circle, color: BloodAppTheme.success),
             ),
             const SizedBox(width: 12),
-            const Text('Complete Request?'),
+            const Expanded(
+              child: Text('Complete Request?'),
+            ),
           ],
         ),
         content: const Text(
@@ -747,9 +751,12 @@ class _RecipientMyRequestsScreenState extends State<RecipientMyRequestsScreen>
       MaterialPageRoute(
         builder: (context) => ChatScreen(
           threadId: request.id,
-          title: request.acceptedByName ?? 'Donor',
-          subtitle: '${request.bloodType} Blood Request',
-          otherUserName: request.acceptedByName,
+          title: request.acceptedByName ?? request.acceptedBloodBankName ?? 'Donor',
+          subtitle: '${request.bloodType} Blood Request - ${request.units} unit(s)',
+          otherUserName: request.acceptedByName ?? request.acceptedBloodBankName,
+          otherUserId: request.acceptedBy,
+          bloodType: request.bloodType,
+          units: request.units,
         ),
       ),
     );

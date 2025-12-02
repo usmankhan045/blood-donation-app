@@ -62,13 +62,25 @@ class _AdminSignUpScreenState extends State<AdminSignUpScreen> {
     });
 
     try {
+      // 👑 Check if any admins exist - first admin becomes Super Admin
+      final existingAdmins = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'admin')
+          .limit(1)
+          .get();
+      
+      final isFirstAdmin = existingAdmins.docs.isEmpty;
+
       UserCredential cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
       );
+      
       await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
         'email': _emailCtrl.text.trim(),
         'role': 'admin',
+        'isSuperAdmin': isFirstAdmin, // First admin is Super Admin
+        'isActive': true,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -77,22 +89,61 @@ class _AdminSignUpScreenState extends State<AdminSignUpScreen> {
 
       setState(() => _loading = false);
 
-      // Show verification dialog
+      // Show verification dialog with Super Admin notice if applicable
       if (mounted) {
         showDialog(
           context: context,
           barrierDismissible: false,
           builder: (context) => AlertDialog(
-            title: Text('Verify Your Email'),
-            content: Text(
-                'A verification link has been sent to your email. Please verify your email before logging in.'),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(
+                  isFirstAdmin ? Icons.star : Icons.admin_panel_settings,
+                  color: isFirstAdmin ? Colors.purple : Colors.blue,
+                ),
+                const SizedBox(width: 10),
+                Text(isFirstAdmin ? 'Super Admin Created!' : 'Admin Created!'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (isFirstAdmin) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.star, color: Colors.purple, size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You are the Super Admin! You can manage all other admins.',
+                            style: TextStyle(fontSize: 12, color: Colors.purple),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                const Text(
+                  'A verification link has been sent to your email. Please verify your email before logging in.',
+                ),
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
                   Navigator.pushReplacementNamed(context, '/admin_login');
                 },
-                child: Text('OK'),
+                child: const Text('OK'),
               ),
             ],
           ),
@@ -138,9 +189,20 @@ class _AdminSignUpScreenState extends State<AdminSignUpScreen> {
       final userSnapshot = await userDoc.get();
 
       if (!userSnapshot.exists) {
+        // 👑 Check if any admins exist - first admin becomes Super Admin
+        final existingAdmins = await FirebaseFirestore.instance
+            .collection('users')
+            .where('role', isEqualTo: 'admin')
+            .limit(1)
+            .get();
+        
+        final isFirstAdmin = existingAdmins.docs.isEmpty;
+
         await userDoc.set({
           'email': userCred.user!.email,
           'role': 'admin',
+          'isSuperAdmin': isFirstAdmin, // First admin is Super Admin
+          'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
         });
       } else if (userSnapshot['role'] != 'admin') {

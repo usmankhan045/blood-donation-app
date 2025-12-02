@@ -111,6 +111,41 @@ class _BloodBankDashboardScreenState extends State<BloodBankDashboardScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: Colors.red),
+            const SizedBox(width: 12),
+            const Text('Logout'),
+          ],
+        ),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/select_role', (route) => false);
+      }
+    }
+  }
+
   int getTotalUnits() {
     if (bloodBankData == null || bloodBankData!['inventory'] == null) return 0;
     Map<String, dynamic> inventory = bloodBankData!['inventory'];
@@ -201,6 +236,18 @@ class _BloodBankDashboardScreenState extends State<BloodBankDashboardScreen> {
                         Navigator.pushNamed(context, '/blood_bank_profile_completion')
                             .then((_) => fetchProfileStatus());
                       },
+                    ),
+                    IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.logout, color: Colors.white, size: 22),
+                      ),
+                      onPressed: _logout,
+                      tooltip: 'Logout',
                     ),
                     const SizedBox(width: 8),
                   ],
@@ -676,6 +723,14 @@ class _BloodBankDashboardScreenState extends State<BloodBankDashboardScreen> {
             iconColor: BloodAppTheme.primary,
             onTap: () => Navigator.pushNamed(context, '/blood_bank_inventory')
                 .then((_) => fetchProfileStatus()),
+          ),
+          Divider(height: 1, indent: 70, endIndent: 16, color: Colors.grey.shade200),
+          _buildQuickActionTile(
+            icon: Icons.chat_bubble_outline,
+            title: 'Messages',
+            subtitle: 'Chat with recipients & hospitals',
+            iconColor: BloodAppTheme.success,
+            onTap: () => Navigator.pushNamed(context, '/chats'),
           ),
           Divider(height: 1, indent: 70, endIndent: 16, color: Colors.grey.shade200),
           _buildQuickActionTile(

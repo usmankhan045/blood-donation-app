@@ -429,18 +429,21 @@ class _BloodBankProfileCompletionScreenState
         'acceptsDonations': acceptsDonations,
         'inventory': inventory,
 
-        // Location data
+        // Location data - 🔧 FIXED: Use 'location' field for consistency with queries
         'latitude': _selectedLatitude,
         'longitude': _selectedLongitude,
         'locationAddress': _locationAddress,
-        'geopoint':
+        'location':
             _selectedLatitude != null && _selectedLongitude != null
                 ? GeoPoint(_selectedLatitude!, _selectedLongitude!)
                 : null,
 
         'profileCompleted': isNowCompleted,
         'userType': 'blood_bank',
-        'isVerified': false,
+        'role': 'blood_bank', // Ensure role is set for queries
+        // 🔧 FIXED: Set isActive to true when profile is completed so blood bank can receive requests
+        'isActive': isNowCompleted,
+        'isVerified': false, // Admin needs to verify separately
         'totalRequests': 0,
         'activeRequests': 0,
         'updatedAt': FieldValue.serverTimestamp(),

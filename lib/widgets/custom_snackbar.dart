@@ -1,628 +1,565 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
+import '../services/navigation_service.dart';
 
-/// 🎨 PROFESSIONAL CUSTOM SNACKBARS - Soft & Eye-Pleasing
+/// 🎨 MODERN TOP SNACKBAR SYSTEM
+/// - Appears at the TOP of the screen
+/// - Short, non-intrusive duration
+/// - Tappable with navigation support
+/// - Beautiful animations
 class AppSnackbar {
+  static OverlayEntry? _currentOverlay;
   
-  /// ✅ Success Snackbar - Soft Mint
-  static void showSuccess(BuildContext context, String message, {String? subtitle}) {
-    _show(
+  /// ✅ Success Snackbar
+  static void showSuccess(
+    BuildContext context,
+    String message, {
+    String? subtitle,
+    VoidCallback? onTap,
+    String? navigateTo,
+  }) {
+    _showTop(
       context,
       message: message,
       subtitle: subtitle,
       icon: Icons.check_circle_rounded,
-      gradient: const LinearGradient(
-        colors: [Color(0xFF7DCEA0), Color(0xFF58D68D)],
-      ),
+      backgroundColor: const Color(0xFF10B981),
+      onTap: onTap,
+      navigateTo: navigateTo,
     );
   }
 
-  /// ❌ Error Snackbar - Soft Coral
-  static void showError(BuildContext context, String message, {String? subtitle}) {
-    _show(
+  /// ❌ Error Snackbar
+  static void showError(
+    BuildContext context,
+    String message, {
+    String? subtitle,
+    VoidCallback? onTap,
+  }) {
+    _showTop(
       context,
       message: message,
       subtitle: subtitle,
       icon: Icons.error_rounded,
-      gradient: const LinearGradient(
-        colors: [Color(0xFFE57373), Color(0xFFEC7063)],
-      ),
+      backgroundColor: const Color(0xFFEF4444),
+      onTap: onTap,
     );
   }
 
-  /// ⚠️ Warning Snackbar - Soft Amber
-  static void showWarning(BuildContext context, String message, {String? subtitle}) {
-    _show(
+  /// ⚠️ Warning Snackbar
+  static void showWarning(
+    BuildContext context,
+    String message, {
+    String? subtitle,
+    VoidCallback? onTap,
+  }) {
+    _showTop(
       context,
       message: message,
       subtitle: subtitle,
       icon: Icons.warning_rounded,
-      gradient: const LinearGradient(
-        colors: [Color(0xFFF8C471), Color(0xFFF5B041)],
-      ),
+      backgroundColor: const Color(0xFFF59E0B),
+      onTap: onTap,
     );
   }
 
-  /// ℹ️ Info Snackbar - Soft Blue
-  static void showInfo(BuildContext context, String message, {String? subtitle}) {
-    _show(
+  /// ℹ️ Info Snackbar
+  static void showInfo(
+    BuildContext context,
+    String message, {
+    String? subtitle,
+    VoidCallback? onTap,
+    String? navigateTo,
+  }) {
+    _showTop(
       context,
       message: message,
       subtitle: subtitle,
       icon: Icons.info_rounded,
-      gradient: const LinearGradient(
-        colors: [Color(0xFF7FB3D5), Color(0xFF5DADE2)],
-      ),
+      backgroundColor: const Color(0xFF3B82F6),
+      onTap: onTap,
+      navigateTo: navigateTo,
     );
   }
 
-  /// 🩸 Blood Request Snackbar
-  static void showBloodRequest(BuildContext context, {
+  /// 🩸 Blood Request Created
+  static void showBloodRequest(
+    BuildContext context, {
     required String title,
     required String bloodType,
     required int donorsNotified,
     required int bloodBanksNotified,
+    String? navigateTo,
   }) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.bloodtype,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$bloodType Blood Request Created',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildStatItem(Icons.people, '$donorsNotified', 'Donors'),
-                    Container(
-                      height: 30,
-                      width: 1,
-                      color: Colors.white.withOpacity(0.3),
-                    ),
-                    _buildStatItem(Icons.local_hospital, '$bloodBanksNotified', 'Blood Banks'),
-                    Container(
-                      height: 30,
-                      width: 1,
-                      color: Colors.white.withOpacity(0.3),
-                    ),
-                    _buildStatItem(Icons.timer, '60m', 'Timer'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 5),
-        margin: const EdgeInsets.all(16),
-        padding: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        dismissDirection: DismissDirection.horizontal,
-      ),
-    );
-
-    // Show the actual snackbar with gradient background
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final overlay = Overlay.of(context);
-      late OverlayEntry entry;
-      
-      entry = OverlayEntry(
-        builder: (context) => Positioned(
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          left: 16,
-          right: 16,
-          child: Material(
-            color: Colors.transparent,
-            child: _AnimatedSnackbar(
-              onDismiss: () => entry.remove(),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFE53935), Color(0xFFD32F2F)],
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.red.withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.bloodtype, color: Colors.white, size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '$bloodType Blood Request',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.9),
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => entry.remove(),
-                          icon: const Icon(Icons.close, color: Colors.white, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildStatItem(Icons.people, '$donorsNotified', 'Donors'),
-                          _buildDivider(),
-                          _buildStatItem(Icons.local_hospital, '$bloodBanksNotified', 'Banks'),
-                          _buildDivider(),
-                          _buildStatItem(Icons.timer, '60m', 'Timer'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      overlay.insert(entry);
-      
-      // Auto dismiss after 5 seconds
-      Future.delayed(const Duration(seconds: 5), () {
-        if (entry.mounted) {
-          entry.remove();
-        }
-      });
-    });
-  }
-
-  static Widget _buildDivider() {
-    return Container(
-      height: 30,
-      width: 1,
-      color: Colors.white.withOpacity(0.3),
+    _showTopExtended(
+      context,
+      title: title,
+      subtitle: '$bloodType Blood • $donorsNotified donors • $bloodBanksNotified banks notified',
+      icon: Icons.bloodtype_rounded,
+      backgroundColor: const Color(0xFFDC2626),
+      navigateTo: navigateTo ?? '/recipient/my_requests',
     );
   }
 
-  static Widget _buildStatItem(IconData icon, String value, String label) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 16),
-            const SizedBox(width: 4),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.8),
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 🎯 Main Show Method
-  static void _show(
-    BuildContext context, {
-    required String message,
-    String? subtitle,
-    required IconData icon,
-    required LinearGradient gradient,
-    Duration duration = const Duration(seconds: 4),
-    VoidCallback? onAction,
-    String? actionLabel,
-  }) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Container(
-          decoration: BoxDecoration(
-            gradient: gradient,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: gradient.colors.first.withOpacity(0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      message,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white.withOpacity(0.85),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (onAction != null && actionLabel != null)
-                TextButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                    onAction();
-                  },
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white.withOpacity(0.2),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: Text(
-                    actionLabel,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        duration: duration,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        padding: EdgeInsets.zero,
-        dismissDirection: DismissDirection.horizontal,
-      ),
-    );
-  }
-
-  /// 🔔 Notification Received Snackbar - Professional Style
+  /// 🔔 Notification Snackbar
   static void showNotification(
     BuildContext context, {
     required String title,
     required String body,
+    String? type,
+    String? requestId,
+    String? threadId,
     VoidCallback? onTap,
   }) {
-    ScaffoldMessenger.of(context).clearSnackBars();
+    IconData icon;
+    Color color;
+    String? navigateTo;
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Container(
-          decoration: BoxDecoration(
-            gradient: BloodAppTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: BloodAppTheme.primary.withOpacity(0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.notifications_active,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      body,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withOpacity(0.9),
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (onTap != null)
-                TextButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                    onTap();
-                  },
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    minimumSize: Size.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: const Text(
-                    'VIEW',
-                    style: TextStyle(
-                      color: BloodAppTheme.primary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 6),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        padding: EdgeInsets.zero,
-        dismissDirection: DismissDirection.horizontal,
-      ),
+    switch (type) {
+      case 'blood_request':
+      case 'emergency_blood_request':
+        icon = Icons.bloodtype_rounded;
+        color = const Color(0xFFDC2626);
+        navigateTo = '/donor_requests';
+        break;
+      case 'request_accepted':
+        icon = Icons.check_circle_rounded;
+        color = const Color(0xFF10B981);
+        navigateTo = '/recipient/my_requests';
+        break;
+      case 'chat_message':
+        icon = Icons.chat_bubble_rounded;
+        color = const Color(0xFF8B5CF6);
+        navigateTo = '/chats';
+        break;
+      case 'fulfillment_reminder':
+        icon = Icons.access_time_filled_rounded;
+        color = const Color(0xFFF59E0B);
+        navigateTo = '/blood_bank_dashboard';
+        break;
+      default:
+        icon = Icons.notifications_rounded;
+        color = BloodAppTheme.primary;
+    }
+    
+    _showTop(
+      context,
+      message: title,
+      subtitle: body,
+      icon: icon,
+      backgroundColor: color,
+      onTap: onTap,
+      navigateTo: navigateTo,
+      duration: const Duration(seconds: 3),
     );
   }
 
-  /// 🩸 Blood Request Action Snackbar
+  /// 🎯 Request Accepted
+  static void showRequestAccepted(
+    BuildContext context, {
+    required String acceptorName,
+    required String bloodType,
+    String? navigateTo,
+    VoidCallback? onTap,
+  }) {
+    _showTop(
+      context,
+      message: 'Request Accepted! 🎉',
+      subtitle: '$acceptorName accepted your $bloodType blood request',
+      icon: Icons.volunteer_activism_rounded,
+      backgroundColor: const Color(0xFF10B981),
+      navigateTo: navigateTo,
+      onTap: onTap,
+    );
+  }
+
+  /// 💬 New Chat Message
+  static void showChatMessage(
+    BuildContext context, {
+    required String senderName,
+    required String message,
+    String? threadId,
+    VoidCallback? onTap,
+  }) {
+    _showTop(
+      context,
+      message: senderName,
+      subtitle: message.length > 50 ? '${message.substring(0, 50)}...' : message,
+      icon: Icons.chat_bubble_rounded,
+      backgroundColor: const Color(0xFF8B5CF6),
+      onTap: onTap,
+      navigateTo: '/chats',
+      duration: const Duration(seconds: 2),
+    );
+  }
+
+  /// 🩸 Request Action Snackbar
   static void showRequestAction(
     BuildContext context, {
     required String title,
     required String subtitle,
     required IconData icon,
     required Color color,
-    VoidCallback? onAction,
-    String? actionLabel,
+    VoidCallback? onTap,
+    String? navigateTo,
   }) {
-    ScaffoldMessenger.of(context).clearSnackBars();
+    _showTop(
+      context,
+      message: title,
+      subtitle: subtitle,
+      icon: icon,
+      backgroundColor: color,
+      onTap: onTap,
+      navigateTo: navigateTo,
+    );
+  }
+
+  /// 🎬 Main TOP Snackbar
+  static void _showTop(
+    BuildContext context, {
+    required String message,
+    String? subtitle,
+    required IconData icon,
+    required Color backgroundColor,
+    VoidCallback? onTap,
+    String? navigateTo,
+    Duration duration = const Duration(milliseconds: 2500),
+  }) {
+    // Dismiss current if exists
+    _dismissCurrent();
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withOpacity(0.3)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
+    final overlay = Overlay.of(context);
+    
+    _currentOverlay = OverlayEntry(
+      builder: (context) => _TopSnackbarWidget(
+        message: message,
+        subtitle: subtitle,
+        icon: icon,
+        backgroundColor: backgroundColor,
+        duration: duration,
+        onTap: () {
+          _dismissCurrent();
+          if (onTap != null) {
+            onTap();
+          } else if (navigateTo != null) {
+            NavigationService.instance.navigateTo(navigateTo);
+          }
+        },
+        onDismiss: _dismissCurrent,
+      ),
+    );
+    
+    overlay.insert(_currentOverlay!);
+  }
+
+  /// 📊 Extended Top Snackbar (with more info)
+  static void _showTopExtended(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color backgroundColor,
+    String? navigateTo,
+    VoidCallback? onTap,
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    _dismissCurrent();
+    
+    final overlay = Overlay.of(context);
+    
+    _currentOverlay = OverlayEntry(
+      builder: (context) => _TopSnackbarWidget(
+        message: title,
+        subtitle: subtitle,
+        icon: icon,
+        backgroundColor: backgroundColor,
+        duration: duration,
+        showArrow: true,
+        onTap: () {
+          _dismissCurrent();
+          if (onTap != null) {
+            onTap();
+          } else if (navigateTo != null) {
+            NavigationService.instance.navigateTo(navigateTo);
+          }
+        },
+        onDismiss: _dismissCurrent,
+      ),
+    );
+    
+    overlay.insert(_currentOverlay!);
+  }
+
+  /// Dismiss current snackbar
+  static void _dismissCurrent() {
+    _currentOverlay?.remove();
+    _currentOverlay = null;
+  }
+
+  /// Dismiss all snackbars (can be called from outside)
+  static void dismiss() {
+    _dismissCurrent();
+  }
+}
+
+/// 🎨 Top Snackbar Widget with animations
+class _TopSnackbarWidget extends StatefulWidget {
+  final String message;
+  final String? subtitle;
+  final IconData icon;
+  final Color backgroundColor;
+  final Duration duration;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+  final bool showArrow;
+
+  const _TopSnackbarWidget({
+    required this.message,
+    this.subtitle,
+    required this.icon,
+    required this.backgroundColor,
+    required this.duration,
+    required this.onTap,
+    required this.onDismiss,
+    this.showArrow = false,
+  });
+
+  @override
+  State<_TopSnackbarWidget> createState() => _TopSnackbarWidgetState();
+}
+
+class _TopSnackbarWidgetState extends State<_TopSnackbarWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+  bool _isVisible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 250),
+      vsync: this,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1.2),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+
+    _controller.forward();
+
+    // Auto dismiss
+    Future.delayed(widget.duration, () {
+      if (_isVisible && mounted) {
+        _dismiss();
+      }
+    });
+  }
+
+  void _dismiss() async {
+    if (!_isVisible) return;
+    _isVisible = false;
+    await _controller.reverse();
+    widget.onDismiss();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topPadding = MediaQuery.of(context).padding.top;
+    
+    return Positioned(
+      top: topPadding + 8,
+      left: 12,
+      right: 12,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            onVerticalDragUpdate: (details) {
+              if (details.delta.dy < -5) {
+                _dismiss();
+              }
+            },
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: BloodAppTheme.textPrimary,
-                      ),
+                  color: widget.backgroundColor,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: widget.backgroundColor.withOpacity(0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: BloodAppTheme.textSecondary,
-                      ),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
-              ),
-              if (onAction != null && actionLabel != null)
-                TextButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                    onAction();
-                  },
-                  style: TextButton.styleFrom(
-                    backgroundColor: color,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    minimumSize: Size.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: Text(
-                    actionLabel,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Stack(
+                    children: [
+                      // Background pattern
+                      Positioned(
+                        right: -20,
+                        top: -20,
+                        child: Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 30,
+                        bottom: -30,
+                        child: Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withOpacity(0.05),
+                          ),
+                        ),
+                      ),
+                      // Content
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            // Icon
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                widget.icon,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Text
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.message,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                      height: 1.2,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (widget.subtitle != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      widget.subtitle!,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.85),
+                                        fontSize: 12,
+                                        height: 1.3,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            // Arrow indicator
+                            if (widget.showArrow) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  color: Colors.white,
+                                  size: 12,
+                                ),
+                              ),
+                            ],
+                            // Close button
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: _dismiss,
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.close_rounded,
+                                  color: Colors.white.withOpacity(0.7),
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-            ],
+              ),
+            ),
           ),
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 5),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        padding: EdgeInsets.zero,
-        dismissDirection: DismissDirection.horizontal,
       ),
     );
   }
 }
 
-/// 🎬 Animated Snackbar Wrapper
-class _AnimatedSnackbar extends StatefulWidget {
+/// 🎬 Legacy support - Animated Snackbar (for old code compatibility)
+class AnimatedSnackbar extends StatefulWidget {
   final Widget child;
   final VoidCallback onDismiss;
 
-  const _AnimatedSnackbar({
+  const AnimatedSnackbar({
+    super.key,
     required this.child,
     required this.onDismiss,
   });
 
   @override
-  State<_AnimatedSnackbar> createState() => _AnimatedSnackbarState();
+  State<AnimatedSnackbar> createState() => _AnimatedSnackbarState();
 }
 
-class _AnimatedSnackbarState extends State<_AnimatedSnackbar>
+class _AnimatedSnackbarState extends State<AnimatedSnackbar>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -641,9 +578,9 @@ class _AnimatedSnackbarState extends State<_AnimatedSnackbar>
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1),
+      begin: const Offset(0, -1),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
   }
@@ -665,4 +602,3 @@ class _AnimatedSnackbarState extends State<_AnimatedSnackbar>
     );
   }
 }
-

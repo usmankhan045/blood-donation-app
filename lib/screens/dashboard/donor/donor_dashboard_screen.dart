@@ -60,7 +60,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
     final userId = _auth.currentUser?.uid;
     if (userId == null) return;
 
-    // Incoming requests listener
+    // Incoming requests listener - requests where donor is in potentialDonors
     _firestore
         .collection('blood_requests')
         .where('potentialDonors', arrayContains: userId)
@@ -78,10 +78,11 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
       }
     });
 
-    // Accepted requests listener
+    // Accepted requests listener - only count requests this donor personally accepted
     _firestore
         .collection('blood_requests')
         .where('acceptedBy', isEqualTo: userId)
+        .where('acceptedByType', isEqualTo: 'donor')
         .where('status', isEqualTo: 'accepted')
         .snapshots()
         .listen((snapshot) {
@@ -92,16 +93,35 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
       }
     });
 
-    // Completed donations listener
+    // Completed donations listener - only count donations this donor completed
     _firestore
         .collection('blood_requests')
         .where('acceptedBy', isEqualTo: userId)
+        .where('acceptedByType', isEqualTo: 'donor')
         .where('status', isEqualTo: 'completed')
         .snapshots()
         .listen((snapshot) {
       if (mounted) {
         setState(() {
           _totalDonations = snapshot.docs.length;
+        });
+      }
+    });
+
+    // Also listen for profile changes to update blood type in real-time
+    _firestore.collection('users').doc(userId).snapshots().listen((snapshot) {
+      if (mounted && snapshot.exists) {
+        final data = snapshot.data() ?? {};
+        setState(() {
+          // Try bloodGroup first, then bloodType, ensure uppercase
+          final bloodGroup = data['bloodGroup'] as String?;
+          final bloodType = data['bloodType'] as String?;
+          _bloodType = (bloodGroup ?? bloodType)?.toUpperCase();
+          _donorName = data['fullName'] as String?;
+          _city = data['city'] as String?;
+          _isAvailable = (data['isAvailable'] ?? false) as bool;
+          _profileCompleted = (data['profileCompleted'] ?? false) as bool;
+          _hasLocation = data['location'] != null;
         });
       }
     });
@@ -207,14 +227,25 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
     final doc = await _firestore.collection('users').doc(uid).get();
     final d = doc.data() ?? {};
     if (!mounted) return;
+    
+    // Get blood type - check both fields to ensure we get the correct value
+    final bloodGroup = d['bloodGroup'] as String?;
+    final bloodType = d['bloodType'] as String?;
+    
     setState(() {
       _isAvailable = (d['isAvailable'] ?? false) as bool;
       _profileCompleted = (d['profileCompleted'] ?? false) as bool;
       _city = d['city'] as String?;
-      _bloodType = (d['bloodGroup'] ?? d['bloodType'] as String?)?.toUpperCase();
+      _bloodType = (bloodGroup ?? bloodType)?.toUpperCase();
       _donorName = d['fullName'] as String?;
       _hasLocation = d['location'] != null;
     });
+    
+    // Debug log to help diagnose the issue
+    debugPrint('📊 Donor Profile Loaded:');
+    debugPrint('   - bloodGroup field: $bloodGroup');
+    debugPrint('   - bloodType field: $bloodType');
+    debugPrint('   - Final _bloodType: $_bloodType');
   }
 
   Future<void> _loadStats() async {
@@ -284,6 +315,41 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
     );
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: BloodAppTheme.error),
+            const SizedBox(width: 12),
+            const Text('Logout'),
+          ],
+        ),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: BloodAppTheme.error),
+            child: const Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _auth.signOut();
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/select_role', (route) => false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ready = _profileCompleted;
@@ -349,6 +415,18 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
                         ],
                       ),
                       onPressed: _openProfile,
+                    ),
+                    IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.logout, color: Colors.white, size: 22),
+                      ),
+                      onPressed: _logout,
+                      tooltip: 'Logout',
                     ),
                     const SizedBox(width: 8),
                   ],
@@ -855,6 +933,16 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen>
                 enabled: canReceive,
                 onTap: _openRequestsScreen,
                 badge: _incomingRequestsCount,
+                showArrow: true,
+              ),
+              Divider(height: 1, indent: 70, endIndent: 16, color: Colors.grey.shade200),
+              _buildQuickActionTile(
+                icon: Icons.chat_bubble_outline,
+                title: 'Messages',
+                subtitle: 'Chat with recipients',
+                iconColor: BloodAppTheme.info,
+                enabled: ready,
+                onTap: () => Navigator.pushNamed(context, '/chats'),
                 showArrow: true,
               ),
               Divider(height: 1, indent: 70, endIndent: 16, color: Colors.grey.shade200),
