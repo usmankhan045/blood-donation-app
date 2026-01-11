@@ -22,7 +22,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.blood"
-        minSdk 23  // ✅ Keep at 23 for cloud_firestore
+        minSdkVersion flutter.minSdkVersion  // ✅ Keep at 23 for cloud_firestore
         targetSdk flutter.targetSdkVersion
         versionCode flutter.versionCode
         versionName flutter.versionName

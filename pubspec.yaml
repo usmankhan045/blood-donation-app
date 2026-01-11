@@ -50,7 +50,7 @@ flutter:
   assets:
     - lib/assets/images/logo.png
     - lib/assets/images/google_logo.png
-    - lib/assets/service_account.json
+    # - lib/assets/service_account.json
 
   uses-material-design: true
 

@@ -28,12 +28,15 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
     return Scaffold(
       backgroundColor: BloodAppTheme.background,
       body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+        stream:
+            FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(BloodAppTheme.primary),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  BloodAppTheme.primary,
+                ),
               ),
             );
           }
@@ -60,7 +63,12 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
                       const SizedBox(height: 20),
 
                       // Profile Sections
-                      _buildViewSection(data, verified, completed, profileCompletedAt),
+                      _buildViewSection(
+                        data,
+                        verified,
+                        completed,
+                        profileCompletedAt,
+                      ),
 
                       const SizedBox(height: 24),
 
@@ -134,10 +142,7 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
       flexibleSpace: FlexibleSpaceBar(
         title: Text(
           name,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         background: Container(
           decoration: const BoxDecoration(
@@ -158,10 +163,7 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white,
-                            width: 3,
-                          ),
+                          border: Border.all(color: Colors.white, width: 3),
                         ),
                         child: const Icon(
                           Icons.local_hospital,
@@ -208,13 +210,19 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
                     children: [
                       _buildStatusChip(
                         completed ? 'Complete' : 'Incomplete',
-                        completed ? BloodAppTheme.success : BloodAppTheme.warning,
+                        completed
+                            ? BloodAppTheme.success
+                            : BloodAppTheme.warning,
                         completed ? Icons.check_circle : Icons.pending,
                       ),
                       _buildStatusChip(
                         verified ? 'Verified' : 'Unverified',
-                        verified ? BloodAppTheme.info : BloodAppTheme.textSecondary,
-                        verified ? Icons.verified_user : Icons.verified_user_outlined,
+                        verified
+                            ? BloodAppTheme.info
+                            : BloodAppTheme.textSecondary,
+                        verified
+                            ? Icons.verified_user
+                            : Icons.verified_user_outlined,
                       ),
                     ],
                   ),
@@ -290,7 +298,12 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -320,10 +333,7 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
           const SizedBox(height: 4),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 12,
-              color: BloodAppTheme.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, color: BloodAppTheme.textSecondary),
             textAlign: TextAlign.center,
           ),
         ],
@@ -425,38 +435,42 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          ...items.map((item) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        item.label,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: BloodAppTheme.textSecondary,
-                        ),
+          ...items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 120,
+                    child: Text(
+                      item.label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: BloodAppTheme.textSecondary,
                       ),
                     ),
-                    Expanded(
-                      child: Text(
-                        item.value,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: item.highlight
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          color: item.highlight
-                              ? BloodAppTheme.accent
-                              : BloodAppTheme.textPrimary,
-                        ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      item.value,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            item.highlight
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                        color:
+                            item.highlight
+                                ? BloodAppTheme.accent
+                                : BloodAppTheme.textPrimary,
                       ),
                     ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -469,32 +483,33 @@ class _HospitalProfileScreenState extends State<HospitalProfileScreen> {
   Future<void> _showSignOutDialog() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
-        ),
-        title: Row(
-          children: [
-            const Icon(Icons.logout, color: BloodAppTheme.error),
-            const SizedBox(width: 12),
-            const Text('Sign Out'),
-          ],
-        ),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: BloodAppTheme.error,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(BloodAppTheme.radiusLg),
             ),
-            child: const Text('Sign Out'),
+            title: Row(
+              children: [
+                const Icon(Icons.logout, color: BloodAppTheme.error),
+                const SizedBox(width: 12),
+                const Text('Sign Out'),
+              ],
+            ),
+            content: const Text('Are you sure you want to sign out?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: BloodAppTheme.error,
+                ),
+                child: const Text('Sign Out'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirmed == true) {
@@ -517,4 +532,3 @@ class _InfoItem {
 
   _InfoItem(this.label, this.value, {this.highlight = false});
 }
-
